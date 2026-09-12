@@ -1,9 +1,11 @@
-Prompt: 
+# Prompt: 
 Give me everything i need to know about gods eye view, how it was made etc so that i know if that is relevant for my diploma thesis as my partner and i need to analyse flight for the bmlv in austria (so its not really defined but basically we just need to use open source data and make analysis on that and we have two additional teammates from the department of wirtschaftsingenieure, we are from an htl tgm in vienna last year for matura) were still discussing the tech stack and researching what already exists, and as i said we found gods eye view and there is also cirium or oag, were still trying to find out what makes us unique, so the usp, and also we wanna compete in many competitions centered around diplomarbeiten for htl and try to incorporate features for that, like also sustainability and whatever and future
 
 we just dont know where to start, first give me an overview over the market a detailed one using the newest sources online, then give me a unique selling point for my project and then give me options for my tech stack and what is realistic for a diploma thesis
 
-Answer:
+---
+
+# Answer:
 Good news first: God's Eye View is **not** a competitor to what you're doing. It's a display, not an analysis tool. That distinction is going to be the backbone of your whole thesis positioning, so let me go through it properly.
 
 ## 1. God's Eye View — what it actually is
