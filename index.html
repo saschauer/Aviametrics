@@ -1,0 +1,424 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aviametrics – Flugdatenanalyse für das BMLV</title>
+<meta name="description" content="Aviametrics: Diplomarbeit am TGM Wien (Abteilung Informationstechnologie). Eine Anwendung zur Analyse offener ADS-B-Flugdaten über Österreich – Projektpartner: Bundesministerium für Landesverteidigung.">
+<meta property="og:title" content="Aviametrics – Flugdaten nutzbar machen">
+<meta property="og:description" content="Diplomarbeit am TGM Wien: eine Analyseanwendung für offene Flugdaten über Österreich, in Kooperation mit dem BMLV.">
+<meta property="og:image" content="assets/og-image.jpg">
+<meta property="og:type" content="website">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='31' fill='%2313263C'/%3E%3Cpath d='M31 27 Q18 20 4 22 Q10 26 10 31 Q16 31 18 35 Q24 34 31 33Z M33 27 Q46 20 60 22 Q54 26 54 31 Q48 31 46 35 Q40 34 33 33Z' fill='%23F4F1EA'/%3E%3Ccircle cx='32' cy='22' r='3.4' fill='%23F4F1EA'/%3E%3Crect x='29.6' y='26' width='4.8' height='18' rx='1.5' fill='%23F4F1EA'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400..700;1,400..600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ink:#2B2117; --ink-soft:#5A4B3C; --red:#9C3D22; --paper:#FBF8F2; --paper-2:#F3EDE2; --line:#E2D8C6;
+  --navy:#13263C; --cyan:#2C9AD1; --cyan-soft:#E3F2FA; --green:#2E8B57; --white:#fff;
+  --serif:'EB Garamond',Georgia,'Times New Roman',serif; --sans:'Inter',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+  --max:1120px; --r:14px;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth;scroll-padding-top:76px}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:17px;line-height:1.65;-webkit-font-smoothing:antialiased}
+img{max-width:100%;display:block}
+a{color:var(--red);text-decoration-thickness:1px;text-underline-offset:3px}
+a:hover{color:#7A2E18}
+.wrap{max-width:var(--max);margin:0 auto;padding:0 24px}
+h1,h2,h3{font-family:var(--serif);font-weight:600;line-height:1.15;margin:0}
+h2{font-size:clamp(2rem,4vw,2.8rem);letter-spacing:.01em}
+h3{font-size:1.45rem}
+.eyebrow{font-family:var(--sans);font-size:.78rem;font-weight:600;letter-spacing:.18em;text-transform:uppercase;color:var(--red);margin-bottom:12px;display:block}
+.lead{font-size:1.15rem;color:var(--ink-soft);max-width:760px}
+section{padding:96px 0}
+section.alt{background:var(--paper-2)}
+.rule{height:1px;background:var(--line);border:0;margin:0}
+
+/* nav */
+header.nav{position:sticky;top:0;z-index:50;background:rgba(251,248,242,.92);backdrop-filter:saturate(1.2) blur(10px);border-bottom:1px solid var(--line)}
+.nav .wrap{display:flex;align-items:center;justify-content:space-between;height:64px;gap:16px}
+.brand{display:flex;align-items:center;gap:10px;font-family:var(--serif);font-size:1.35rem;letter-spacing:.14em;color:var(--ink);text-decoration:none;font-weight:600}
+.brand svg{width:30px;height:30px;flex:none}
+.nav ul{list-style:none;margin:0;padding:0;display:flex;gap:4px;flex-wrap:wrap}
+.nav ul a{display:block;padding:8px 12px;border-radius:999px;color:var(--ink-soft);text-decoration:none;font-size:.92rem;font-weight:500}
+.nav ul a:hover,.nav ul a.active{background:var(--ink);color:var(--paper)}
+.menu-btn{display:none;background:none;border:1px solid var(--line);border-radius:10px;padding:8px 10px;font:inherit;color:var(--ink);cursor:pointer}
+@media (max-width:860px){
+  .menu-btn{display:block}
+  .nav ul{display:none;position:absolute;top:64px;left:0;right:0;background:var(--paper);flex-direction:column;padding:12px 24px 20px;border-bottom:1px solid var(--line)}
+  .nav ul.open{display:flex}
+}
+
+/* hero */
+.hero{position:relative;padding:0 0 40px;background:var(--paper)}
+.hero-pic{position:relative;max-height:calc(100vh - 64px);overflow:hidden}
+.hero-pic img{width:100%;height:auto;max-height:calc(100vh - 64px);object-fit:cover;object-position:50% 92%}
+.hero-pic::after{content:"";position:absolute;inset:auto 0 0 0;height:12%;background:linear-gradient(to bottom,rgba(251,248,242,0),var(--paper) 96%)}
+.hero-text{position:relative;z-index:2;text-align:center;padding:0 16px;margin-top:-36px}
+.hero-text h1{font-size:clamp(2.1rem,9vw,6.4rem);letter-spacing:.14em;font-weight:500;padding-left:.14em}
+@media (max-width:520px){.hero-text{margin-top:-8px}.hero-text .tag::before,.hero-text .tag::after{width:28px}}
+.hero-text .tag{font-family:var(--serif);font-style:italic;font-size:clamp(1.2rem,2.4vw,1.6rem);color:var(--ink-soft);display:flex;align-items:center;justify-content:center;gap:16px;margin-top:6px}
+.hero-text .tag::before,.hero-text .tag::after{content:"";width:56px;height:1px;background:var(--red)}
+.hero-meta{margin-top:18px;font-size:.9rem;color:var(--ink-soft)}
+.hero-meta b{color:var(--ink);font-weight:600}
+
+/* facts strip */
+.facts{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--line);border:1px solid var(--line);border-radius:var(--r);overflow:hidden;margin-top:48px}
+.facts div{background:var(--paper);padding:20px 22px}
+.facts b{display:block;font-family:var(--serif);font-size:1.25rem;font-weight:600}
+.facts span{font-size:.88rem;color:var(--ink-soft)}
+@media (max-width:760px){.facts{grid-template-columns:1fr 1fr}}
+
+/* task */
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:40px;margin-top:48px}
+@media (max-width:860px){.grid2{grid-template-columns:1fr}}
+.card{background:var(--white);border:1px solid var(--line);border-radius:var(--r);padding:30px}
+.card h3{margin-bottom:6px}
+.card .who{font-size:.9rem;color:var(--red);font-weight:600;margin-bottom:14px;display:block}
+.card ul{margin:12px 0 0;padding-left:20px}
+.card li{margin:6px 0}
+.quote{font-family:var(--serif);font-size:clamp(1.5rem,3vw,2.1rem);line-height:1.3;font-style:italic;max-width:860px;margin:40px 0 0;padding-left:24px;border-left:3px solid var(--red)}
+
+/* pipeline */
+.pipe{display:grid;grid-template-columns:repeat(4,1fr);gap:18px;margin-top:48px;counter-reset:s}
+.step{position:relative;background:var(--white);border:1px solid var(--line);border-radius:var(--r);padding:26px 22px}
+.step::before{counter-increment:s;content:counter(s,upper-roman) ".";font-family:var(--serif);font-style:italic;color:var(--red);font-size:1.1rem}
+.step h3{font-size:1.3rem;letter-spacing:.08em;text-transform:uppercase;margin:6px 0 8px}
+.step p{margin:0;font-size:.95rem;color:var(--ink-soft)}
+.step:not(:last-child)::after{content:"→";position:absolute;right:-16px;top:50%;transform:translateY(-50%);color:var(--red);font-size:1.3rem;z-index:2;background:var(--paper-2);width:16px;text-align:center}
+@media (max-width:860px){.pipe{grid-template-columns:1fr 1fr}.step::after{display:none}}
+@media (max-width:520px){.pipe{grid-template-columns:1fr}}
+.stack{display:flex;flex-wrap:wrap;gap:8px;margin-top:20px}
+.chip{font-size:.85rem;padding:6px 12px;border-radius:999px;background:var(--white);border:1px solid var(--line);color:var(--ink)}
+.chip.cy{background:var(--cyan-soft);border-color:#BFE0F1}
+.note{font-size:.88rem;color:var(--ink-soft);margin-top:14px}
+
+/* result */
+.results{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:40px}
+@media (max-width:860px){.results{grid-template-columns:1fr}}
+.res{background:var(--white);border:1px solid var(--line);border-radius:var(--r);padding:26px}
+.res svg{width:36px;height:36px;color:var(--navy);margin-bottom:12px}
+.res h3{font-size:1.3rem;margin-bottom:6px}
+.res p{margin:0;font-size:.95rem;color:var(--ink-soft)}
+
+/* progress */
+.progress-head{display:flex;justify-content:space-between;align-items:flex-end;gap:24px;flex-wrap:wrap}
+.bar{height:10px;background:var(--line);border-radius:99px;overflow:hidden;width:100%}
+.bar i{display:block;height:100%;background:linear-gradient(90deg,var(--red),#C0623F);border-radius:99px}
+.updated{font-size:.88rem;color:var(--ink-soft)}
+.ms{margin-top:36px;border:1px solid var(--line);border-radius:var(--r);overflow:hidden;background:var(--white)}
+.ms-row{display:grid;grid-template-columns:44px 1fr 130px 190px;gap:16px;align-items:center;padding:16px 22px;border-top:1px solid var(--line)}
+.ms-row:first-child{border-top:0}
+.ms-row.head{background:var(--paper-2);font-size:.78rem;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-soft)}
+.dot{width:26px;height:26px;border-radius:50%;border:2px solid var(--line);display:grid;place-items:center;font-size:.8rem;color:#fff}
+.done .dot{background:var(--green);border-color:var(--green)}
+.wip .dot{border-color:var(--red);background:conic-gradient(var(--red) 0 60%,#fff 0)}
+.ms-title{font-weight:500}
+.ms-date{font-variant-numeric:tabular-nums;color:var(--ink-soft);font-size:.95rem}
+.badge{justify-self:start;font-size:.8rem;font-weight:600;padding:5px 11px;border-radius:999px;background:var(--paper-2);color:var(--ink-soft)}
+.done .badge{background:#E3F2EA;color:#1F6B42}
+.wip .badge{background:#F6E6DF;color:var(--red)}
+@media (max-width:760px){.ms-row{grid-template-columns:34px 1fr;row-gap:4px}.ms-row .ms-date,.ms-row .badge{grid-column:2}.ms-row.head{display:none}}
+.log{margin-top:56px;position:relative}
+.log h3{margin-bottom:20px}
+.entry{display:grid;grid-template-columns:150px 1fr;gap:24px;padding:18px 0;border-top:1px solid var(--line)}
+.entry time{font-family:var(--serif);font-size:1.15rem;color:var(--red);font-style:italic}
+.entry h4{margin:0 0 4px;font-size:1.02rem}
+.entry p{margin:0;color:var(--ink-soft);font-size:.95rem}
+@media (max-width:640px){.entry{grid-template-columns:1fr;gap:4px}}
+
+/* team */
+.team{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-top:48px}
+@media (max-width:760px){.team{grid-template-columns:1fr}}
+.person{display:flex;gap:22px;background:var(--white);border:1px solid var(--line);border-radius:var(--r);padding:28px}
+.avatar{width:112px;height:112px;border-radius:50%;flex:none;display:grid;place-items:center;font-family:var(--serif);font-size:2.4rem;color:var(--paper);background:var(--navy);overflow:hidden}
+.avatar img{width:100%;height:100%;object-fit:cover}
+.person h3{margin:4px 0 2px}
+.role{font-size:.92rem;color:var(--red);font-weight:600}
+.person p{margin:10px 0;font-size:.95rem;color:var(--ink-soft)}
+.mail{display:inline-flex;align-items:center;gap:8px;font-size:.92rem;font-weight:500}
+@media (max-width:520px){.person{flex-direction:column}}
+.mentors{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-top:24px}
+@media (max-width:760px){.mentors{grid-template-columns:1fr}}
+.mentor{border:1px dashed var(--line);border-radius:var(--r);padding:22px 26px}
+.mentor span{font-size:.78rem;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-soft)}
+.mentor b{display:block;font-family:var(--serif);font-size:1.3rem;font-weight:600;margin-top:4px}
+
+/* partners / pitch */
+.pitch{display:grid;grid-template-columns:1.2fr 1fr;gap:48px;align-items:center}
+@media (max-width:860px){.pitch{grid-template-columns:1fr}}
+.pitch ul{padding-left:0;list-style:none;margin:24px 0 0}
+.pitch li{padding:12px 0 12px 34px;position:relative;border-top:1px solid var(--line)}
+.pitch li::before{content:"✦";position:absolute;left:4px;color:var(--red)}
+.poster{border-radius:10px;box-shadow:0 20px 50px rgba(43,33,23,.18);border:1px solid var(--line)}
+.btn{display:inline-flex;align-items:center;gap:10px;padding:13px 22px;border-radius:999px;background:var(--ink);color:var(--paper);text-decoration:none;font-weight:600;font-size:.95rem;margin-top:26px}
+.btn:hover{background:var(--red);color:#fff}
+.btn.ghost{background:transparent;color:var(--ink);border:1px solid var(--ink);margin-left:8px}
+.btn.ghost:hover{background:var(--ink);color:var(--paper)}
+
+/* contact + footer */
+.contact{background:var(--navy);color:#E8EEF4}
+.contact h2{color:#fff}
+.contact .eyebrow{color:#8FD0EE}
+.contact .lead{color:#C4D1DD}
+.contact-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:40px}
+@media (max-width:860px){.contact-grid{grid-template-columns:1fr}}
+.ccard{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);border-radius:var(--r);padding:24px}
+.ccard span{font-size:.78rem;letter-spacing:.14em;text-transform:uppercase;color:#8FD0EE;font-weight:600}
+.ccard b{display:block;font-family:var(--serif);font-size:1.3rem;font-weight:600;color:#fff;margin:6px 0}
+.ccard a{color:#fff}
+footer{background:#0D1B2B;color:#9FB0C1;font-size:.88rem;padding:36px 0}
+footer .wrap{display:flex;justify-content:space-between;gap:24px;flex-wrap:wrap}
+footer a{color:#C9D6E2}
+</style>
+</head>
+<body>
+
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="#top" aria-label="Aviametrics – zum Seitenanfang">
+      <svg viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="31" fill="#13263C"/><path d="M31 27 Q18 20 4 22 Q10 26 10 31 Q16 31 18 35 Q24 34 31 33Z M33 27 Q46 20 60 22 Q54 26 54 31 Q48 31 46 35 Q40 34 33 33Z" fill="#F4F1EA"/><circle cx="32" cy="22" r="3.4" fill="#F4F1EA"/><rect x="29.6" y="26" width="4.8" height="18" rx="1.5" fill="#F4F1EA"/></svg>
+      AVIAMETRICS
+    </a>
+    <button class="menu-btn" aria-expanded="false" aria-controls="menu">Menü</button>
+    <ul id="menu">
+      <li><a href="#aufgabe">Aufgabenstellung</a></li>
+      <li><a href="#architektur">Architektur</a></li>
+      <li><a href="#ergebnis">Ergebnis</a></li>
+      <li><a href="#fortschritt">Fortschritt</a></li>
+      <li><a href="#team">Team</a></li>
+      <li><a href="#kontakt">Kontakt</a></li>
+    </ul>
+  </div>
+</header>
+
+<main id="top">
+  <section class="hero" aria-label="Titel">
+    <div class="hero-pic"><img src="assets/hero.jpg" srcset="assets/hero-small.jpg 1200w, assets/hero.jpg 2200w" sizes="100vw" alt="Gemalte Illustration: ein Entwickler sitzt an seinem Schreibtisch in den Wolken vor der riesigen Nase eines Verkehrsflugzeugs. Aus seinem Monitor projiziert ein Hologramm zwei Karten Österreichs – links viele Flugrouten, rechts deutlich weniger, mit dem Hinweis −20 % CO₂."></div>
+    <div class="hero-text">
+      <h1>AVIAMETRICS</h1>
+      <div class="tag">Flugdaten nutzbar machen</div>
+      <div class="hero-meta">Diplomarbeit · TGM Wien · Abteilung Informationstechnologie · 2026/27 · Projektpartner: <b>Bundesministerium für Landesverteidigung</b></div>
+    </div>
+  </section>
+
+  <!-- ================= AUFGABENSTELLUNG ================= -->
+  <section id="aufgabe">
+    <div class="wrap">
+      <span class="eyebrow">Aufgabenstellung</span>
+      <h2>Was Photoshop für Bilder ist,<br>soll Aviametrics für Flugdaten werden.</h2>
+      <p class="lead" style="margin-top:20px">Über Österreich sind täglich tausende Flugzeuge unterwegs. Fast alle senden per ADS-B laufend ihre Position, Höhe und Geschwindigkeit. Weltweit zeichnen freiwillige Empfänger diese Signale auf und stellen sie offen zur Verfügung: ein riesiger Datenschatz, aber roh, lückenhaft und ohne Werkzeuge kaum nutzbar.</p>
+      <p class="lead">Für das <b>Bundesministerium für Landesverteidigung (BMLV)</b> entwickeln wir eine Anwendung, mit der sich diese offenen Flugdaten erfassen, aufbereiten und analysieren lassen – von der einzelnen Flugbewegung bis zur Statistik je Bundesland.</p>
+
+      <div class="facts" role="list">
+        <div role="listitem"><b>Offene Daten</b><span>ADS-B-Signale auf 1090 MHz, von Community-Netzwerken gesammelt</span></div>
+        <div role="listitem"><b>Österreich</b><span>Fokus auf den Luftraum und die Bundesländer</span></div>
+        <div role="listitem"><b>R &amp; Python</b><span>eigene Analysealgorithmen über eine dokumentierte API</span></div>
+        <div role="listitem"><b>Abgesichert</b><span>Zugriffskontrolle und IT-Sicherheit von Beginn an</span></div>
+      </div>
+
+      <div class="grid2">
+        <article class="card">
+          <span class="who">Stefan Aschauer · verantwortlich</span>
+          <h3>Systemarchitektur, Datenpipeline und Analyseschnittstelle für Flugverkehrsdaten</h3>
+          <ul>
+            <li>Offene Flugdatenquellen bewerten: Abdeckung, Datenvolumen und Lizenz</li>
+            <li>Automatisierte Datenpipeline: Erfassung, Bereinigung, Flugsegmentierung und Anreicherung (z.&nbsp;B. überflogenes Bundesland)</li>
+            <li>Dokumentierte Schnittstelle, über die externe Analysealgorithmen in R und Python auf die Daten zugreifen</li>
+            <li>Interaktive Anwendung mit statistischen Visualisierungen</li>
+          </ul>
+        </article>
+        <article class="card">
+          <span class="who">Isaac Jerryson</span>
+          <h3>Systemumsetzung, Zugriffskontrolle und IT-Sicherheit der Analyseplattform</h3>
+          <ul>
+            <li>Umsetzung der Webanwendung und der Kartenansichten</li>
+            <li>Anmeldung und rollenbasiertes Berechtigungsmodell</li>
+            <li>Absicherung von Schnittstellen, Datenbank und Betrieb (Verschlüsselung, Secrets, Container)</li>
+            <li>Bedrohungsanalyse und Sicherheitsüberprüfung der Plattform</li>
+          </ul>
+        </article>
+      </div>
+
+      <p class="quote">„Von den ersten Gleitflügen Otto Lilienthals bis zu Millionen Positionsmeldungen am Tag: Wir machen sichtbar, was über unseren Köpfen passiert.“</p>
+    </div>
+  </section>
+
+  <!-- ================= ARCHITEKTUR ================= -->
+  <section id="architektur" class="alt">
+    <div class="wrap">
+      <span class="eyebrow">Architektur</span>
+      <h2>Vom Funksignal zur Erkenntnis</h2>
+      <p class="lead" style="margin-top:20px">Die Daten durchlaufen vier Stufen. Jede Stufe ist ein eigener, nachvollziehbarer Schritt – so lassen sich Ergebnisse jederzeit reproduzieren und neue Analysen einfach ergänzen.</p>
+      <div class="pipe">
+        <div class="step"><h3>Erfassen</h3><p>Täglicher Import offener ADS-B-Daten, z.&nbsp;B. aus den Archiven von adsb.lol und OpenSky.</p></div>
+        <div class="step"><h3>Aufbereiten</h3><p>Bereinigung fehlerhafter Positionen, Zerlegung in einzelne Flüge, Zuordnung zu Bundesländern.</p></div>
+        <div class="step"><h3>Bereitstellen</h3><p>Spaltenorientierte Speicherung und eine dokumentierte API für Analysen in R und Python.</p></div>
+        <div class="step"><h3>Analysieren</h3><p>Interaktive App: Flüge, Flugkilometer und geschätzte Emissionen je Bundesland.</p></div>
+      </div>
+      <div class="stack" aria-label="Technologien">
+        <span class="chip">Python</span><span class="chip">R</span><span class="chip">Dagster</span><span class="chip">Apache Parquet</span><span class="chip">DuckDB</span><span class="chip">FastAPI / OpenAPI</span><span class="chip">Streamlit</span><span class="chip">React</span><span class="chip cy">OAuth 2.0 / OpenID Connect</span><span class="chip cy">Rollenbasierte Zugriffskontrolle</span><span class="chip cy">TLS</span><span class="chip cy">Docker</span>
+      </div>
+      <p class="note">Technologie-Stack Stand Oktober 2026 – die endgültige Auswahl folgt aus unserer Machbarkeitsstudie.</p>
+    </div>
+  </section>
+
+  <!-- ================= ERGEBNIS ================= -->
+  <section id="ergebnis">
+    <div class="wrap">
+      <span class="eyebrow">Ergebnis</span>
+      <h2>Die Analyseanwendung Aviametrics</h2>
+      <p class="lead" style="margin-top:20px">Am Ende steht eine einsatzbereite, abgesicherte Plattform, die das BMLV mit eigenen Fragestellungen und eigenen Algorithmen weiterverwenden kann.</p>
+      <div class="results">
+        <div class="res">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18"/><circle cx="7" cy="6" r="1.6"/><circle cx="14" cy="12" r="1.6"/><circle cx="10" cy="18" r="1.6"/></svg>
+          <h3>Automatisierte Datenpipeline</h3>
+          <p>Holt, bereinigt und strukturiert die Flugdaten selbstständig – täglich und nachvollziehbar.</p>
+        </div>
+        <div class="res">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 7l-5 5 5 5M16 7l5 5-5 5M14 4l-4 16"/></svg>
+          <h3>Dokumentierte Schnittstelle</h3>
+          <p>Analysealgorithmen in R und Python greifen über eine offen beschriebene API auf die Daten zu.</p>
+        </div>
+        <div class="res">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>
+          <h3>Interaktive Analyse-App</h3>
+          <p>Karten und Statistiken, z.&nbsp;B. Flüge, Flugkilometer und geschätzte Emissionen je Bundesland.</p>
+        </div>
+      </div>
+      <p class="note">Abgesichert durch Anmeldung, rollenbasierte Berechtigungen und eine abschließende Sicherheitsüberprüfung.</p>
+    </div>
+  </section>
+
+  <!-- ================= FORTSCHRITT ================= -->
+  <section id="fortschritt" class="alt">
+    <div class="wrap">
+      <div class="progress-head">
+        <div>
+          <span class="eyebrow">Fortschritt</span>
+          <h2>Meilensteine &amp; Projekttagebuch</h2>
+        </div>
+        <div style="flex:1;max-width:420px">
+          <div class="updated">Zuletzt aktualisiert: <b>22.10.2026</b></div>
+          <div class="bar" style="margin-top:8px" role="progressbar" aria-valuemin="0" aria-valuemax="7" aria-valuenow="1" aria-label="Meilensteine erreicht"><i style="width:14%"></i></div>
+          <div class="updated" style="margin-top:6px">7 Meilensteine laut Projektantrag · laufende Arbeit an 2</div>
+        </div>
+      </div>
+
+      <!-- Status pflegen: Klasse "done" (erledigt), "wip" (in Arbeit) oder leer (geplant) -->
+      <div class="ms" role="table" aria-label="Meilensteine">
+        <div class="ms-row head" role="row"><span></span><span>Meilenstein</span><span>Geplant</span><span>Status</span></div>
+        <div class="ms-row wip" role="row"><span class="dot"></span><span class="ms-title">Analyseschnittstelle für externe Algorithmen fertiggestellt</span><span class="ms-date">07.10.2026</span><span class="badge">In Fertigstellung</span></div>
+        <div class="ms-row wip" role="row"><span class="dot"></span><span class="ms-title">Funktionsfähigen Prototyp erstellt</span><span class="ms-date">23.10.2026</span><span class="badge">In Arbeit</span></div>
+        <div class="ms-row" role="row"><span class="dot"></span><span class="ms-title">Rollenbasiertes Berechtigungsmodell implementiert</span><span class="ms-date">27.11.2026</span><span class="badge">Geplant</span></div>
+        <div class="ms-row" role="row"><span class="dot"></span><span class="ms-title">Datenanalysen fertiggestellt und visualisiert</span><span class="ms-date">16.12.2026</span><span class="badge">Geplant</span></div>
+        <div class="ms-row" role="row"><span class="dot"></span><span class="ms-title">Bedrohungsanalyse und Sicherheitsüberprüfung der Plattform abgeschlossen</span><span class="ms-date">15.01.2027</span><span class="badge">Geplant</span></div>
+        <div class="ms-row" role="row"><span class="dot"></span><span class="ms-title">Finale Version der Applikation einsatzbereit</span><span class="ms-date">31.01.2027</span><span class="badge">Geplant</span></div>
+        <div class="ms-row" role="row"><span class="dot"></span><span class="ms-title">Projektdokumentation fertiggestellt</span><span class="ms-date">15.02.2027</span><span class="badge">Geplant</span></div>
+      </div>
+
+      <!-- Neue Einträge oben einfügen -->
+      <div class="log">
+        <h3>Projekttagebuch</h3>
+        <div class="entry"><time datetime="2026-10-22">22.10.2026</time><div><h4>Website online &amp; Projektplakat eingereicht</h4><p>Projektplakat im Format DIN A1 gestaltet und eingereicht; diese Website informiert ab sofort laufend über den Projektstand.</p></div></div>
+        <div class="entry"><time datetime="2026-10-20">20.10.2026</time><div><h4>Architektur der Datenpipeline festgelegt</h4><p>Ablauf von der Erfassung bis zur Visualisierung definiert: automatisierter Import, Speicherung im spaltenorientierten Format Parquet, Transformationen und eine interaktive Oberfläche. Erste Analysen geplant: Flüge und Flugkilometer je Bundesland sowie ein Emissions-Näherungswert je Flugzeugtyp.</p></div></div>
+        <div class="entry"><time datetime="2026-10-20">20.10.2026</time><div><h4>Corporate Design</h4><p>Logo- und Gestaltungskonzepte rund um Otto Lilienthal, den Pionier des Gleitflugs, entwickelt.</p></div></div>
+        <div class="entry"><time datetime="2026-10-13">13.10.2026</time><div><h4>Offene Flugdatenquellen untersucht</h4><p>ADS-B-Datenformat analysiert und Quellen wie ADS-B Exchange, adsb.lol und das OpenSky Network nach Datenstruktur, Umfang und Lizenz verglichen. Erste Überlegungen zur geografischen Zuordnung von Positionen (Land, Bundesland, Stadt).</p></div></div>
+        <div class="entry"><time datetime="2026-10-08">08.10.2026</time><div><h4>State of the Art abgeschlossen</h4><p>Systematische Darstellung bestehender Technologien: Pipeline-Orchestrierung, Datenspeicherung, Abfrage-Engines, Schnittstellen und Visualisierung sowie Frontend, Zugriffskontrolle und IT-Sicherheit.</p></div></div>
+        <div class="entry"><time datetime="2026-09-21">21.09.2026</time><div><h4>Kooperation mit dem BMLV</h4><p>Die Kooperationsvereinbarung mit dem Bundesministerium für Landesverteidigung tritt in Kraft – Projektstart.</p></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= TEAM ================= -->
+  <section id="team">
+    <div class="wrap">
+      <span class="eyebrow">Team</span>
+      <h2>Wer hinter Aviametrics steht</h2>
+      <p class="lead" style="margin-top:20px">Zwei Schüler der Abteilung Informationstechnologie am TGM – Die Schule der Technik, Jahrgang 5BHIT.</p>
+      <div class="team">
+        <article class="person">
+          <!-- Foto: <img src="assets/stefan.jpg" alt="Stefan Aschauer"> statt "SA" einsetzen -->
+          <div class="avatar" aria-hidden="true">SA</div>
+          <div>
+            <span class="role">Projektleitung</span>
+            <h3>Stefan Aschauer</h3>
+            <p>Systemarchitektur, Datenpipeline und Analyseschnittstelle. Schwerpunkt Data Science.</p>
+            <a class="mail" href="mailto:saschauer@student.tgm.ac.at">✉ saschauer@student.tgm.ac.at</a>
+          </div>
+        </article>
+        <article class="person">
+          <!-- Foto: <img src="assets/isaac.jpg" alt="Isaac Jerryson"> statt "IJ" einsetzen -->
+          <div class="avatar" aria-hidden="true" style="background:#3B2A1A">IJ</div>
+          <div>
+            <span class="role">Systemumsetzung &amp; Sicherheit</span>
+            <h3>Isaac Jerryson</h3>
+            <p>Systemumsetzung, Zugriffskontrolle und IT-Sicherheit der Analyseplattform. Schwerpunkt IT-Security.</p>
+            <a class="mail" href="mailto:ijerryson@student.tgm.ac.at">✉ ijerryson@student.tgm.ac.at</a>
+          </div>
+        </article>
+      </div>
+      <div class="mentors">
+        <div class="mentor"><span>Betreuung</span><b>Dipl.-Ing. Marius Totter</b>TGM – Abteilung Informationstechnologie</div>
+        <div class="mentor"><span>Projektpartner</span><b>Bundesministerium für Landesverteidigung</b>Kooperation seit September 2026</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= FÜR UNTERNEHMEN ================= -->
+  <section id="partner" class="alt">
+    <div class="wrap pitch">
+      <div>
+        <span class="eyebrow">Für Unternehmen &amp; Partner</span>
+        <h2>Aviametrics auf einen Blick</h2>
+        <ul>
+          <li><b>Offene Daten, echter Nutzen:</b> frei verfügbare Flugdaten werden zu belastbaren Analysen für Österreich.</li>
+          <li><b>Erweiterbar:</b> eigene Algorithmen in R oder Python lassen sich über die API direkt anbinden.</li>
+          <li><b>Sicher by Design:</b> Zugriffskontrolle und IT-Sicherheit sind Teil der Architektur, nicht nachträglich ergänzt.</li>
+          <li><b>Nachhaltigkeit im Blick:</b> Flugkilometer und geschätzte Emissionen je Region machen Umweltwirkungen sichtbar.</li>
+        </ul>
+        <a class="btn" href="assets/Aviametrics_Plakat_A1.pdf" download>Projektplakat (PDF) herunterladen</a>
+        <a class="btn ghost" href="#kontakt">Kontakt aufnehmen</a>
+      </div>
+      <a href="assets/Aviametrics_Plakat_A1.pdf" aria-label="Projektplakat als PDF öffnen"><img class="poster" src="assets/plakat-vorschau.jpg" alt="Vorschau des Aviametrics-Projektplakats im Format DIN A1"></a>
+    </div>
+  </section>
+
+  <!-- ================= KONTAKT ================= -->
+  <section id="kontakt" class="contact">
+    <div class="wrap">
+      <span class="eyebrow">Kontakt</span>
+      <h2>Fragen, Ideen, Zusammenarbeit?</h2>
+      <p class="lead" style="margin-top:20px">Wir freuen uns über Nachrichten – ob zur Technik, zu den Daten oder zu einer möglichen Zusammenarbeit.</p>
+      <div class="contact-grid">
+        <div class="ccard"><span>Projektleitung</span><b>Stefan Aschauer</b><a href="mailto:saschauer@student.tgm.ac.at">saschauer@student.tgm.ac.at</a></div>
+        <div class="ccard"><span>Systemumsetzung &amp; Sicherheit</span><b>Isaac Jerryson</b><a href="mailto:ijerryson@student.tgm.ac.at">ijerryson@student.tgm.ac.at</a></div>
+        <div class="ccard"><span>Schule</span><b>TGM – Die Schule der Technik</b>Wexstraße 19–23, 1200 Wien<br><a href="https://www.tgm.ac.at" rel="noopener">www.tgm.ac.at</a></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div>© 2026 Aviametrics · Diplomarbeit am TGM Wien, Abteilung Informationstechnologie · Schulprojekt, nicht kommerziell</div>
+    <div>Flugdaten: adsb.lol (ODbL), OpenSky Network · Illustration KI-gestützt erstellt</div>
+  </div>
+</footer>
+
+<script>
+  // Mobile menu
+  const btn = document.querySelector('.menu-btn'), menu = document.getElementById('menu');
+  btn.addEventListener('click', () => { const o = menu.classList.toggle('open'); btn.setAttribute('aria-expanded', o); });
+  menu.querySelectorAll('a').forEach(a => a.addEventListener('click', () => { menu.classList.remove('open'); btn.setAttribute('aria-expanded', false); }));
+  // Highlight current section in the navigation
+  const links = [...menu.querySelectorAll('a')];
+  const obs = new IntersectionObserver(es => es.forEach(e => {
+    if (e.isIntersecting) links.forEach(l => l.classList.toggle('active', l.getAttribute('href') === '#' + e.target.id));
+  }), { rootMargin: '-45% 0px -50% 0px' });
+  links.forEach(l => { const s = document.querySelector(l.getAttribute('href')); if (s) obs.observe(s); });
+</script>
+</body>
+</html>
