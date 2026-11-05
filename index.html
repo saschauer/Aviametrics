@@ -53,9 +53,11 @@ header.nav{position:sticky;top:0;z-index:50;background:rgba(251,248,242,.92);bac
 
 /* hero */
 .hero{position:relative;padding:0 0 40px;background:var(--paper)}
-.hero-pic{position:relative;max-height:calc(100vh - 64px);overflow:hidden}
-.hero-pic img{width:100%;height:auto;max-height:calc(100vh - 64px);object-fit:cover;object-position:50% 92%}
-.hero-pic::after{content:"";position:absolute;inset:auto 0 0 0;height:12%;background:linear-gradient(to bottom,rgba(251,248,242,0),var(--paper) 96%)}
+.hero-pic{--h:min(calc(100vw / 1.212),max(340px,calc(100vh - 294px)));position:relative;overflow:hidden;height:var(--h);background:#B9C8D6}
+.hero-pic::before{content:"";position:absolute;inset:-60px;background:url(assets/hero-small.jpg) center 35%/cover no-repeat;filter:blur(30px) saturate(.9)}
+.hero-pic img{position:relative;display:block;margin:0 auto;height:100%;width:min(100%,calc(var(--h) * 1.212 * 1.45));object-fit:cover;object-position:50% 85%;-webkit-mask-image:linear-gradient(to right,transparent,#000 6%,#000 94%,transparent);mask-image:linear-gradient(to right,transparent,#000 6%,#000 94%,transparent)}
+@media (max-aspect-ratio:1/1){.hero-pic img{-webkit-mask-image:none;mask-image:none}}
+.hero-pic::after{content:"";position:absolute;z-index:1;inset:auto 0 0 0;height:14%;background:linear-gradient(to bottom,rgba(251,248,242,0),var(--paper) 96%)}
 .hero-text{position:relative;z-index:2;text-align:center;padding:0 16px;margin-top:-36px}
 .hero-text h1{font-size:clamp(2.1rem,9vw,6.4rem);letter-spacing:.14em;font-weight:500;padding-left:.14em}
 @media (max-width:520px){.hero-text{margin-top:-8px}.hero-text .tag::before,.hero-text .tag::after{width:28px}}
@@ -133,8 +135,9 @@ header.nav{position:sticky;top:0;z-index:50;background:rgba(251,248,242,.92);bac
 .team{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-top:48px}
 @media (max-width:760px){.team{grid-template-columns:1fr}}
 .person{display:flex;gap:22px;background:var(--white);border:1px solid var(--line);border-radius:var(--r);padding:28px}
-.avatar{width:112px;height:112px;border-radius:50%;flex:none;display:grid;place-items:center;font-family:var(--serif);font-size:2.4rem;color:var(--paper);background:var(--navy);overflow:hidden}
-.avatar img{width:100%;height:100%;object-fit:cover}
+.avatar{width:132px;height:165px;flex:none;background:#EDE6DA;padding:6px;border:1px solid var(--line);box-shadow:0 6px 18px rgba(43,33,23,.12);transform:rotate(-1.2deg)}
+.person:nth-child(2) .avatar{transform:rotate(1.2deg)}
+.avatar img{width:100%;height:100%;object-fit:cover;filter:contrast(1.02)}
 .person h3{margin:4px 0 2px}
 .role{font-size:.92rem;color:var(--red);font-weight:600}
 .person p{margin:10px 0;font-size:.95rem;color:var(--ink-soft)}
@@ -169,6 +172,11 @@ header.nav{position:sticky;top:0;z-index:50;background:rgba(251,248,242,.92);bac
 .ccard span{font-size:.78rem;letter-spacing:.14em;text-transform:uppercase;color:#8FD0EE;font-weight:600}
 .ccard b{display:block;font-family:var(--serif);font-size:1.3rem;font-weight:600;color:#fff;margin:6px 0}
 .ccard a{color:#fff}
+.schools{background:#fff;border-top:1px solid var(--line);padding:28px 0}
+.schools .wrap{display:flex;align-items:center;justify-content:center;gap:48px;flex-wrap:wrap}
+.schools span{font-size:.85rem;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-soft);font-weight:600}
+.schools img{height:54px;width:auto}
+.schools img[src*="it-logo"]{height:62px}
 footer{background:#0D1B2B;color:#9FB0C1;font-size:.88rem;padding:36px 0}
 footer .wrap{display:flex;justify-content:space-between;gap:24px;flex-wrap:wrap}
 footer a{color:#C9D6E2}
@@ -215,7 +223,7 @@ footer a{color:#C9D6E2}
       <div class="facts" role="list">
         <div role="listitem"><b>Offene Daten</b><span>ADS-B-Signale auf 1090 MHz, von Community-Netzwerken gesammelt</span></div>
         <div role="listitem"><b>Österreich</b><span>Fokus auf den Luftraum und die Bundesländer</span></div>
-        <div role="listitem"><b>R &amp; Python</b><span>eigene Analysealgorithmen über eine dokumentierte API</span></div>
+        <div role="listitem"><b>Plugin-System</b><span>eigene Analysealgorithmen in R und Python als Plugins einbinden</span></div>
         <div role="listitem"><b>Abgesichert</b><span>Zugriffskontrolle und IT-Sicherheit von Beginn an</span></div>
       </div>
 
@@ -226,7 +234,7 @@ footer a{color:#C9D6E2}
           <ul>
             <li>Offene Flugdatenquellen bewerten: Abdeckung, Datenvolumen und Lizenz</li>
             <li>Automatisierte Datenpipeline: Erfassung, Bereinigung, Flugsegmentierung und Anreicherung (z.&nbsp;B. überflogenes Bundesland)</li>
-            <li>Dokumentierte Schnittstelle, über die externe Analysealgorithmen in R und Python auf die Daten zugreifen</li>
+            <li>Plugin-System: eine dokumentierte Analyseschnittstelle, über die externe Algorithmen in R und Python als Plugins an die Anwendung angebunden werden</li>
             <li>Interaktive Anwendung mit statistischen Visualisierungen</li>
           </ul>
         </article>
@@ -255,7 +263,7 @@ footer a{color:#C9D6E2}
       <div class="pipe">
         <div class="step"><h3>Erfassen</h3><p>Täglicher Import offener ADS-B-Daten, z.&nbsp;B. aus den Archiven von adsb.lol und OpenSky.</p></div>
         <div class="step"><h3>Aufbereiten</h3><p>Bereinigung fehlerhafter Positionen, Zerlegung in einzelne Flüge, Zuordnung zu Bundesländern.</p></div>
-        <div class="step"><h3>Bereitstellen</h3><p>Spaltenorientierte Speicherung und eine dokumentierte API für Analysen in R und Python.</p></div>
+        <div class="step"><h3>Bereitstellen</h3><p>Spaltenorientierte Speicherung und ein Plugin-System, über das Algorithmen in R und Python auf die Daten zugreifen.</p></div>
         <div class="step"><h3>Analysieren</h3><p>Interaktive App: Flüge, Flugkilometer und geschätzte Emissionen je Bundesland.</p></div>
       </div>
       <div class="stack" aria-label="Technologien">
@@ -279,8 +287,8 @@ footer a{color:#C9D6E2}
         </div>
         <div class="res">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 7l-5 5 5 5M16 7l5 5-5 5M14 4l-4 16"/></svg>
-          <h3>Dokumentierte Schnittstelle</h3>
-          <p>Analysealgorithmen in R und Python greifen über eine offen beschriebene API auf die Daten zu.</p>
+          <h3>Plugin-System</h3>
+          <p>Eigene Analysealgorithmen in R und Python werden als Plugins eingebunden – über eine offen dokumentierte Schnittstelle, ohne die Anwendung selbst zu verändern.</p>
         </div>
         <div class="res">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>
@@ -310,7 +318,7 @@ footer a{color:#C9D6E2}
       <!-- Status pflegen: Klasse "done" (erledigt), "wip" (in Arbeit) oder leer (geplant) -->
       <div class="ms" role="table" aria-label="Meilensteine">
         <div class="ms-row head" role="row"><span></span><span>Meilenstein</span><span>Geplant</span><span>Status</span></div>
-        <div class="ms-row wip" role="row"><span class="dot"></span><span class="ms-title">Analyseschnittstelle für externe Algorithmen fertiggestellt</span><span class="ms-date">07.10.2026</span><span class="badge">In Fertigstellung</span></div>
+        <div class="ms-row wip" role="row"><span class="dot"></span><span class="ms-title">Analyseschnittstelle (Plugin-System) für externe Algorithmen fertiggestellt</span><span class="ms-date">07.10.2026</span><span class="badge">In Fertigstellung</span></div>
         <div class="ms-row wip" role="row"><span class="dot"></span><span class="ms-title">Funktionsfähigen Prototyp erstellt</span><span class="ms-date">23.10.2026</span><span class="badge">In Arbeit</span></div>
         <div class="ms-row" role="row"><span class="dot"></span><span class="ms-title">Rollenbasiertes Berechtigungsmodell implementiert</span><span class="ms-date">27.11.2026</span><span class="badge">Geplant</span></div>
         <div class="ms-row" role="row"><span class="dot"></span><span class="ms-title">Datenanalysen fertiggestellt und visualisiert</span><span class="ms-date">16.12.2026</span><span class="badge">Geplant</span></div>
@@ -340,18 +348,16 @@ footer a{color:#C9D6E2}
       <p class="lead" style="margin-top:20px">Zwei Schüler der Abteilung Informationstechnologie am TGM – Die Schule der Technik, Jahrgang 5BHIT.</p>
       <div class="team">
         <article class="person">
-          <!-- Foto: <img src="assets/stefan.jpg" alt="Stefan Aschauer"> statt "SA" einsetzen -->
-          <div class="avatar" aria-hidden="true">SA</div>
+          <div class="avatar"><img src="assets/stefan.jpg" alt="Porträt von Stefan Aschauer"></div>
           <div>
             <span class="role">Projektleitung</span>
             <h3>Stefan Aschauer</h3>
-            <p>Systemarchitektur, Datenpipeline und Analyseschnittstelle. Schwerpunkt Data Science.</p>
+            <p>Systemarchitektur, Datenpipeline und Plugin-System für Analysealgorithmen. Schwerpunkt Data Science.</p>
             <a class="mail" href="mailto:saschauer@student.tgm.ac.at">✉ saschauer@student.tgm.ac.at</a>
           </div>
         </article>
         <article class="person">
-          <!-- Foto: <img src="assets/isaac.jpg" alt="Isaac Jerryson"> statt "IJ" einsetzen -->
-          <div class="avatar" aria-hidden="true" style="background:#3B2A1A">IJ</div>
+          <div class="avatar"><img src="assets/isaac.jpg" alt="Porträt von Isaac Jerryson"></div>
           <div>
             <span class="role">Systemumsetzung &amp; Sicherheit</span>
             <h3>Isaac Jerryson</h3>
@@ -375,7 +381,7 @@ footer a{color:#C9D6E2}
         <h2>Aviametrics auf einen Blick</h2>
         <ul>
           <li><b>Offene Daten, echter Nutzen:</b> frei verfügbare Flugdaten werden zu belastbaren Analysen für Österreich.</li>
-          <li><b>Erweiterbar:</b> eigene Algorithmen in R oder Python lassen sich über die API direkt anbinden.</li>
+          <li><b>Erweiterbar:</b> eigene Algorithmen in R oder Python lassen sich als Plugins direkt anbinden.</li>
           <li><b>Sicher by Design:</b> Zugriffskontrolle und IT-Sicherheit sind Teil der Architektur, nicht nachträglich ergänzt.</li>
           <li><b>Nachhaltigkeit im Blick:</b> Flugkilometer und geschätzte Emissionen je Region machen Umweltwirkungen sichtbar.</li>
         </ul>
@@ -400,6 +406,13 @@ footer a{color:#C9D6E2}
     </div>
   </section>
 </main>
+
+<div class="schools" aria-label="Schule und Abteilung">
+  <div class="wrap"><span>Eine Diplomarbeit am</span>
+    <a href="https://www.tgm.ac.at" rel="noopener"><img src="assets/tgm-logo.svg" alt="TGM – Die Schule der Technik" height="54"></a>
+    <img src="assets/it-logo.svg" alt="Höhere Abteilung für Informationstechnologie" height="62">
+  </div>
+</div>
 
 <footer>
   <div class="wrap">
