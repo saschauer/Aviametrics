@@ -10,7 +10,7 @@ from pathlib import Path
 import httpx
 import orjson
 
-from aviametrics.config import CFG, DATA, IMPORT_DATE, IMPORT_DIR
+from aviametrics.config import CFG, DATA, IMPORT_DATE, IMPORT_DIR, IMPORT_NAME
 
 UA = {"User-Agent": "aviametrics/0.1 (TGM diploma project)"}
 
@@ -18,8 +18,8 @@ UA = {"User-Agent": "aviametrics/0.1 (TGM diploma project)"}
 # ------------------------------------------------------------------ archive
 def raw_day_dir(day: str) -> Path:
     """Return a directory with the extracted trace files of `day` (import if available, else download)."""
-    if IMPORT_DATE == day and (IMPORT_DIR / "day").is_dir():
-        return IMPORT_DIR / "day"
+    if IMPORT_DATE == day and (IMPORT_DIR / IMPORT_NAME).is_dir():
+        return IMPORT_DIR / IMPORT_NAME
     target = DATA / "raw" / day
     if target.is_dir() and any(target.rglob("trace_full_*.json")):
         return target

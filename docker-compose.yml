@@ -2,6 +2,7 @@
 x-common: &common
   build: .
   image: aviametrics:showcase
+  user: "${AVIA_UID:-1000}:${AVIA_GID:-1000}"     # files in data/ belong to you, not root
   volumes:
     - ./data:/data
     - ${AVIA_IMPORT_DIR:-./import}:/import:ro
@@ -10,6 +11,8 @@ x-common: &common
     DAGSTER_HOME: /data/dagster_home
     AVIA_IMPORT_DIR: /import
     AVIA_IMPORT_DATE: ${AVIA_IMPORT_DATE:-}
+    AVIA_IMPORT_NAME: ${AVIA_IMPORT_NAME:-day}
+    HOME: /data/.home                                 # DuckDB extensions, caches
   restart: unless-stopped
 
 services:
@@ -21,12 +24,17 @@ services:
     <<: *common
     command: uvicorn aviametrics.api.main:app --host 0.0.0.0 --port 8000
     ports: ["8000:8000"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/v1/health')"]
+      interval: 10s
+      retries: 12
   app:                 # Streamlit front end (talks only to the API)
     <<: *common
     command: streamlit run app/Aviametrics.py --server.address 0.0.0.0 --server.port 8501
     ports: ["8501:8501"]
     environment:
       AVIA_DATA: /data
+      HOME: /data/.home
       AVIA_API_URL: http://api:8000
       AVIA_PUBLIC_API: http://localhost:8000
     depends_on: [api]
