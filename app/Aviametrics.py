@@ -72,7 +72,7 @@ def deck(layers, view, tooltip=None, height=620):
 AT_VIEW = pdk.ViewState(latitude=47.6, longitude=13.4, zoom=6.3)
 
 # ------------------------------------------------------------------ sidebar: language, role, central day selection
-lang = st.sidebar.radio(t(lang, "language"), list(LANGS), format_func=LANGS.get, horizontal=True,
+lang = st.sidebar.radio("Sprache / Language", list(LANGS), format_func=LANGS.get, horizontal=True,
                         index=list(LANGS).index(CFG["app"]["default_language"]))
 role = st.sidebar.radio(t(lang, "role"), ["visitor", "analyst"], format_func=lambda r: t(lang, f"role_{r}"),
                         help=t(lang, "role_help"), key="role")
