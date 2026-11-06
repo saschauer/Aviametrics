@@ -6,10 +6,12 @@ Showcase for the open day, built on the planned Core architecture; created with 
 Requirements: Docker (or `uv` for `--local`) and git. No data is included – it is downloaded on demand into `data/` (not in git).
 
     git clone -b showcase https://github.com/saschauer/Aviametrics.git && cd Aviametrics
-    ./start.sh --day 2026-11-03        # start + load one day (≈ 3 GB download, ≈ 10 min)
+    ./start.sh
     ./stop.sh
 
-Options: `./start.sh` (start without loading), `--import PATH` (use an already extracted adsb.lol day), `--local` (without Docker).
+Then open the app and use the **Data** tab: download a day, or let the app auto-detect already extracted
+adsb.lol days in your folders and import them. Storage location: `.env` (see `.env.example`).
+Without Docker: `./start.sh --local`.
 App http://localhost:8501 · API docs http://localhost:8000/docs · Pipeline (Dagster) http://localhost:3000
 More days: in the app (Time travel → Load another day) or in Dagster (materialize a partition).
 Data location: `data/` in the project folder; set `AVIA_DATA` to store it elsewhere (e.g. a server disk).

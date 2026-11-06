@@ -19,8 +19,10 @@ while [ $# -gt 0 ]; do
   esac; shift
 done
 
-mkdir -p data/dagster_home data/.home import && touch data/dagster_home/dagster.yaml
-[ -d data/geo ] || git clone -q --depth 1 https://github.com/ginseng666/GeoJSON-TopoJSON-Austria data/geo
+[ -f .env ] && set -a && . ./.env && set +a
+D="${AVIA_DATA_DIR:-./data}"; export AVIA_DATA_DIR="$D"
+mkdir -p "$D/dagster_home" "$D/.home" import && touch "$D/dagster_home/dagster.yaml"
+[ -d "$D/geo" ] || git clone -q --depth 1 https://github.com/ginseng666/GeoJSON-TopoJSON-Austria "$D/geo"
 if [ -n "$IMPORT" ]; then
   [ -d "$IMPORT" ] || { echo "import folder not found: $IMPORT"; exit 1; }
   [ -n "$DAY" ] || { echo "--import needs --day YYYY-MM-DD"; exit 1; }
@@ -34,11 +36,11 @@ banner() { echo; echo "  ✈  AVIAMETRICS is running"; echo "     App       http
 
 if [ "$MODE" = local ]; then
   command -v uv >/dev/null || { echo "uv missing: sudo pacman -S uv  (or https://docs.astral.sh/uv/)"; exit 1; }
-  export AVIA_DATA="$PWD/data" DAGSTER_HOME="$PWD/data/dagster_home" PYTHONPATH="$PWD/src" AVIA_API_URL=http://localhost:8000
+  export AVIA_DATA="$(cd "$D" && pwd)" DAGSTER_HOME="$(cd "$D" && pwd)/dagster_home" PYTHONPATH="$PWD/src" AVIA_API_URL=http://localhost:8000
   export AVIA_IMPORT_DIR="${AVIA_IMPORT_DIR:-$PWD/import}"
   uv sync -q
-  uv run uvicorn aviametrics.api.main:app --port 8000 > data/api.log 2>&1 &
-  uv run dagster dev -m aviametrics.pipeline.definitions -p 3000 > data/dagster.log 2>&1 &
+  uv run uvicorn aviametrics.api.main:app --port 8000 > "$D/api.log" 2>&1 &
+  uv run dagster dev -m aviametrics.pipeline.definitions -p 3000 > "$D/dagster.log" 2>&1 &
   trap 'kill $(jobs -p) 2>/dev/null' EXIT
   wait_api && load_day && banner
   uv run streamlit run app/Aviametrics.py

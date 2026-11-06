@@ -8,7 +8,14 @@ import pyarrow as pa
 import pyarrow.compute as pc
 from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Query, Response
 
-from aviametrics.config import BBOX, DATA, ROOT
+import json
+from datetime import datetime, timezone
+from pathlib import Path
+
+from pydantic import BaseModel
+
+from aviametrics.config import BBOX, DATA, HOST_HOME, ROOT, to_container
+from aviametrics.sources.adsblol import read_trace
 from aviametrics.query import repository as repo
 from aviametrics.sources.adsblol import live_snapshot
 
@@ -80,10 +87,13 @@ def days():
 _jobs: dict = {}
 
 
-def _run_pipeline(day: str):
+def _run_pipeline(day: str, source: str | None = None):
     log = DATA / "logs" / f"{day}.log"
     log.parent.mkdir(parents=True, exist_ok=True)
     env = {**os.environ, "DAGSTER_HOME": os.environ.get("DAGSTER_HOME", str(DATA / "dagster_home"))}
+    if source:  # import an existing extracted day instead of downloading
+        src = to_container(source)
+        env.update(AVIA_IMPORT_DIR=str(src.parent), AVIA_IMPORT_NAME=src.name, AVIA_IMPORT_DATE=day)
     os.makedirs(env["DAGSTER_HOME"], exist_ok=True)
     with open(log, "w") as fh:
         r = subprocess.run(["dagster", "asset", "materialize", "-m", "aviametrics.pipeline.definitions",
@@ -91,13 +101,13 @@ def _run_pipeline(day: str):
     _jobs[day] = "done" if r.returncode == 0 else "failed"
 
 
-@app.post("/v1/days/{day}", summary="Load a day: runs the Dagster pipeline (download → positions → flights)")
-def load_day(day: date, bg: BackgroundTasks):
+@app.post("/v1/days/{day}", summary="Load a day: runs the Dagster pipeline (download or import → positions → flights)")
+def load_day(day: date, bg: BackgroundTasks, source: str | None = None):
     d = day.isoformat()
     if _jobs.get(d) == "running":
         return {"day": d, "status": "running"}
     _jobs[d] = "running"
-    bg.add_task(_run_pipeline, d)
+    bg.add_task(_run_pipeline, d, source)
     return {"day": d, "status": "started"}
 
 
@@ -129,3 +139,54 @@ def positions(day: str, start: int | None = None, end: int | None = None, fmt: L
 @app.get("/v1/flights/{day}", summary="Flight segments (gap > 10 min = new flight) as JSON or Arrow IPC")
 def flights(day: str, fmt: Literal["json", "arrow"] = "json", x_role: Role = Header("visitor")):
     return _arrow_or_json(_mask_table(repo.flights(_day(day)), x_role), fmt)
+
+
+# ------------------------------------------------------------------ data manager (settings + folder auto-detection)
+SETTINGS = DATA / "settings.json"
+
+
+class Settings(BaseModel):
+    folders: list[str] = []
+
+
+def _settings() -> Settings:
+    try:
+        return Settings(**json.loads(SETTINGS.read_text()))
+    except Exception:
+        return Settings()
+
+
+@app.get("/v1/settings")
+def get_settings():
+    return {**_settings().model_dump(), "data_dir": os.environ.get("AVIA_DATA_DIR_HOST", str(DATA)), "host_home": HOST_HOME}
+
+
+@app.put("/v1/settings")
+def put_settings(s: Settings):
+    SETTINGS.write_text(json.dumps(s.model_dump(), indent=1))
+    return s
+
+
+@app.get("/v1/scan", summary="Auto-detect extracted adsb.lol days in the configured folders")
+def scan(max_depth: int = 3):
+    found, loaded = [], set(repo.days())
+    for folder in _settings().folders:
+        root = to_container(folder)
+        if not root.is_dir():
+            found.append({"folder": folder, "error": "not found"}); continue
+        stack = [(root, 0)]
+        while stack:
+            d, depth = stack.pop()
+            if (d / "traces").is_dir():
+                sample = next((d / "traces").glob("*/trace_full_*.json"), None)
+                tr = read_trace(str(sample)) if sample else None
+                day = datetime.fromtimestamp(tr["timestamp"], timezone.utc).date().isoformat() if tr else None
+                host = folder.rstrip("/") + str(d)[len(str(root)):]
+                found.append({"folder": host, "day": day, "loaded": day in loaded})
+                continue
+            if depth < max_depth:
+                try:
+                    stack += [(c, depth + 1) for c in d.iterdir() if c.is_dir() and not c.name.startswith(".")]
+                except PermissionError:
+                    pass
+    return found

@@ -52,7 +52,7 @@ def api(path, method="GET", **kw):
 
 st.markdown('<p class="avia-title">AVIAMETRICS</p>', unsafe_allow_html=True)
 st.markdown(f'<p class="avia-tag">{t(lang, "tagline")}</p>', unsafe_allow_html=True)
-tabs = st.tabs([t(lang, k) for k in ["tab_live", "tab_time", "tab_numbers", "tab_guess", "tab_plugin", "tab_arch"]])
+tabs = st.tabs([t(lang, k) for k in ["tab_live", "tab_time", "tab_numbers", "tab_guess", "tab_plugin", "tab_data", "tab_arch"]])
 
 
 def alt_color(a):
@@ -234,8 +234,43 @@ with tabs[4]:
     with st.expander(t(lang, "plugin_code")):
         st.code(plugin.read_text(), language="python")
 
-# ------------------------------------------------------------------ 6 architecture
+# ------------------------------------------------------------------ 6 data manager
 with tabs[5]:
+    cfg = api("/v1/settings") or {"folders": [], "data_dir": "?"}
+    st.markdown(f"**{t(lang, 'data_location')}:** `{cfg['data_dir']}`")
+    st.caption(t(lang, "data_location_help"))
+    st.markdown(f"**{t(lang, 'loaded_days')}:** " + (", ".join(days) if days else "–"))
+    home = cfg.get("host_home") or ""
+    txt = st.text_area(t(lang, "folders"), "\n".join(f.replace(home, "~", 1) if home and f.startswith(home) else f for f in cfg["folders"]),
+                       help=t(lang, "folders_help"))
+    if st.button(t(lang, "scan")):
+        folders = [(home + l.strip()[1:]) if l.strip().startswith("~") and home else l.strip() for l in txt.splitlines() if l.strip()]
+        api("/v1/settings", method="PUT", json={"folders": folders})
+        st.session_state["scan"] = api("/v1/scan") or []
+    res = st.session_state.get("scan")
+    if res is not None:
+        if not res:
+            st.info(t(lang, "found_none"))
+        for i, r in enumerate(res):
+            c = st.columns([4, 2, 2])
+            c[0].markdown(f"`{r['folder']}`")
+            if r.get("error"):
+                c[1].error(r["error"]); continue
+            c[1].markdown(f"**{r.get('day') or '?'}**")
+            if r.get("loaded"):
+                c[2].caption(t(lang, "already"))
+            elif r.get("day") and c[2].button(t(lang, "import_btn"), key=f"imp{i}"):
+                api(f"/v1/days/{r['day']}", method="POST", params={"source": r["folder"]})
+                st.success(t(lang, "load_started"))
+    st.markdown("---")
+    st.markdown(f"**{t(lang, 'load_day')}**")
+    nd = st.date_input(t(lang, "day"), value=None, format="DD.MM.YYYY", key="dl_day")
+    if nd and st.button(t(lang, "load_btn"), key="dl_btn"):
+        api(f"/v1/days/{nd}", method="POST")
+        st.success(t(lang, "load_started"))
+
+# ------------------------------------------------------------------ 7 architecture
+with tabs[6]:
     st.code("""
  adsb.lol archive ──HTTPS──► [pipeline] Dagster ──Parquet──► data/ ◄──DuckDB── [api] FastAPI ◄──HTTP── [app] Streamlit ◄── you
  adsb.lol / adsb.fi / airplanes.live (live, fallback chain) ──────────────────────► /v1/live    ▲
