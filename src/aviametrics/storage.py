@@ -35,12 +35,12 @@ def src(table: str, day: str) -> str:
 
 
 def _exists(con, table: str) -> bool:
-    return con.sql(f"SELECT count(*) FROM duckdb_tables() WHERE database_name = 'lake' AND table_name = '{table}'").fetchone()[0] > 0
+    return con.execute(f"SELECT count(*) FROM duckdb_tables() WHERE database_name = 'lake' AND table_name = '{table}'").fetchone()[0] > 0
 
 
 def has(con, table: str, day: str) -> bool:
     if MODE == "ducklake":
-        return _exists(con, table) and con.sql(f"SELECT count(*) > 0 FROM lake.{table} WHERE day = DATE '{day}'").fetchone()[0]
+        return _exists(con, table) and con.execute(f"SELECT count(*) > 0 FROM lake.{table} WHERE day = DATE '{day}'").fetchone()[0]
     import os
     return os.path.exists(_file(table, day))
 
@@ -69,3 +69,18 @@ def write(con, table: str, day: str, select_sql: str) -> str:
     os.makedirs(os.path.dirname(f), exist_ok=True)
     con.sql(f"COPY ({select_sql}) TO '{f}' (FORMAT parquet, COMPRESSION zstd)")
     return f
+
+
+# ------------------------------------------------------------------ result conversion (stable across DuckDB 1.x / 2.x)
+def to_arrow(rel):
+    import pyarrow as pa
+    for m in ("to_arrow_table", "fetch_arrow_table", "arrow"):
+        if hasattr(rel, m):
+            r = getattr(rel, m)()
+            return r.read_all() if isinstance(r, pa.RecordBatchReader) else r
+    raise RuntimeError("no Arrow conversion available")
+
+
+def to_records(rel) -> list[dict]:
+    cols = [c[0] for c in rel.description] if getattr(rel, "description", None) else rel.columns
+    return [dict(zip(cols, row)) for row in rel.fetchall()]
