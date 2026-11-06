@@ -392,7 +392,8 @@ with tabs[1]:
                 html = (Path(__file__).parent / "timetravel.html").read_text()
                 components.html(html.replace("__TRIPS__", json.dumps(data["trips"], separators=(",", ":")))
                                 .replace("__GEO__", json.dumps(bundeslaender() or {"type": "FeatureCollection", "features": []}))
-                                .replace("__MASK__", "true" if role == "visitor" else "false"), height=640)
+                                .replace("__MASK__", "true" if role == "visitor" else "false")
+                                .replace("__LBL_AIR__", json.dumps(t(lang, "in_air_now"), ensure_ascii=False)), height=640)
         else:
             area = st.segmented_control(t(lang, "area"), ["at", "all"], default="at", format_func=lambda a: t(lang, "area_" + a), key="tt_area") or "at"
 

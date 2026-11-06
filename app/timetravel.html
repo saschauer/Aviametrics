@@ -5,7 +5,7 @@
 <link href="https://unpkg.com/maplibre-gl@4.0.0/dist/maplibre-gl.css" rel="stylesheet">
 <style>
 html,body{margin:0;height:100%;background:#0e1013;font-family:Georgia,serif;color:#e7c27d;overflow:hidden}
-#map{position:absolute;inset:0}
+#map{position:absolute;top:0;left:0;width:100vw;height:100vh}
 #hud{position:absolute;left:14px;top:12px;background:rgba(14,16,19,.75);padding:8px 14px;border:1px solid #6b5a33;border-radius:6px}
 #clock{font-size:34px;letter-spacing:.08em}#count{font-size:13px;color:#cfc7b6}
 #ctl{position:absolute;left:14px;right:14px;bottom:12px;display:flex;gap:10px;align-items:center}
@@ -21,7 +21,7 @@ window.addEventListener("error",e=>{document.getElementById("count").textContent
 if(typeof deck==="undefined"){setTimeout(()=>{document.getElementById("count").textContent="Fehler: deck.gl konnte nicht geladen werden (unpkg.com blockiert?)"},0)}
 </script>
 <script>
-const TRIPS=__TRIPS__, GEO=__GEO__, MASK=__MASK__;
+const TRIPS=__TRIPS__, GEO=__GEO__, MASK=__MASK__, LBL_AIR=__LBL_AIR__;
 const color=a=>{const x=Math.max(0,Math.min(1,a/40000));return[80+175*x,170+30*x-60*x*x,255-210*x]};
 TRIPS.forEach(d=>{d.c=d.mil&&MASK?[200,80,80]:color(Math.max(...d.alt))});
 let t=21600,playing=true,last=performance.now();
@@ -30,6 +30,7 @@ const map=new maplibregl.Map({container:document.getElementById('map'),style:'ht
  center:[13.4,47.6],zoom:6.4,pitch:35,bearing:-8,attributionControl:{compact:true}});
 const deckgl=new deck.MapboxOverlay({interleaved:false,layers:[]});
 map.addControl(deckgl);
+const fit=()=>map.resize(); map.on('load',fit); window.addEventListener('resize',fit); setTimeout(fit,150); setTimeout(fit,800);
 function layers(){return[
  new deck.GeoJsonLayer({id:'bl',data:GEO,stroked:true,filled:false,getLineColor:[217,179,108,110],lineWidthMinPixels:1}),
  new deck.TripsLayer({id:'trips',data:TRIPS,getPath:d=>d.path,getTimestamps:d=>d.t,getColor:d=>d.c,
@@ -37,7 +38,9 @@ function layers(){return[
 function frame(now){const dt=(now-last)/1000;last=now;
  if(playing){t=(t+dt*+document.getElementById('speed').value)%86400;tEl.value=t}
  const h=Math.floor(t/3600),m=Math.floor(t%3600/60);clock.textContent=String(h).padStart(2,'0')+':'+String(m).padStart(2,'0');
- let n=0;for(const d of TRIPS){if(d.t[0]<=t&&d.t[d.t.length-1]>=t)n++}count.textContent=n+' ✈';
+ let n=0;for(const d of TRIPS){const a=d.t;if(a[0]>t+300||a[a.length-1]<t-300)continue;let lo=0,hi=a.length-1;while(lo<hi){const m=(lo+hi)>>1;if(a[m]<t)lo=m+1;else hi=m}
+ if(Math.abs(a[lo]-t)<=300||(lo>0&&Math.abs(a[lo-1]-t)<=300))n++}
+ count.textContent=n.toLocaleString('de-AT')+' '+LBL_AIR;
  deckgl.setProps({layers:layers()});requestAnimationFrame(frame)}
 document.getElementById('play').onclick=e=>{playing=!playing;e.target.textContent=playing?'⏸':'▶'};
 tEl.oninput=e=>{t=+e.target.value};

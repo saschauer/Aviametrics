@@ -77,7 +77,9 @@ def trips(day: str, step_s: int = 30) -> dict:
     t0 = storage.one(con(), f"SELECT min(ts) - (min(ts) + 3600) % 86400 FROM {_p(day)}")[0]
     rows = con().sql(f"""SELECT icao, bool_or(mil) AS mil, list([lon, lat] ORDER BY ts) AS path,
                                 list(ts - {t0} ORDER BY ts) AS t, list(coalesce(alt, 0) ORDER BY ts) AS alt
-                         FROM (SELECT * FROM {_p(day)} QUALIFY row_number() OVER (PARTITION BY icao, ts // {step_s} ORDER BY ts) = 1)
+                         FROM (SELECT * FROM {_p(day)}
+                               WHERE alt > 0 AND coalesce(gs, 0) >= 40       -- airborne only (no ground vehicles / parked aircraft)
+                               QUALIFY row_number() OVER (PARTITION BY icao, ts // {step_s} ORDER BY ts) = 1)
                          GROUP BY icao HAVING count(*) > 2""").fetchall()
     return {"t0": t0, "trips": [{"mil": r[1], "path": [[round(x, 4), round(y, 4)] for x, y in r[2]], "t": list(r[3]),
                                  "alt": list(r[4])} for r in rows]}
