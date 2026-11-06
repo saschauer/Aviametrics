@@ -31,11 +31,11 @@ fi
 export AVIA_UID="$(id -u)" AVIA_GID="$(id -g)"
 # native folder dialog helper (runs on this computer, opens zenity/kdialog for the app)
 export AVIA_PICKER_TOKEN="$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')"
-if command -v zenity >/dev/null || command -v kdialog >/dev/null; then
-  pkill -f tools/folder_picker.py 2>/dev/null || true
-  nohup python3 tools/folder_picker.py > "$D/picker.log" 2>&1 &
+pkill -f tools/folder_picker.py 2>/dev/null || true
+if command -v uv >/dev/null; then      # XDG Desktop Portal via jeepney (pure Python, installed on the fly by uv)
+  nohup uv run --quiet --no-project --with jeepney python tools/folder_picker.py > "$D/picker.log" 2>&1 &
 else
-  echo "Tip: install zenity for the native folder dialog:  sudo pacman -S zenity"
+  nohup python3 tools/folder_picker.py > "$D/picker.log" 2>&1 &
 fi
 
 wait_api() { for _ in $(seq 1 120); do curl -sf http://localhost:8000/v1/health >/dev/null && return 0; sleep 2; done; return 1; }
