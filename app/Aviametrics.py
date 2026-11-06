@@ -19,7 +19,7 @@ from aviametrics.i18n import LANGS, t  # noqa: E402
 
 PUBLIC_API = os.environ.get("AVIA_PUBLIC_API", "http://localhost:8000")
 GOLD, BLUE = "#d9b36c", "#7fa7c9"
-st.set_page_config(page_title="Aviametrics", page_icon="✈️", layout="wide")
+st.set_page_config(page_title="Aviametrics", page_icon="✈", layout="wide")
 st.markdown("""<style>
 @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&display=swap');
 .block-container{padding-top:1.4rem;max-width:1600px}
@@ -72,7 +72,7 @@ def deck(layers, view, tooltip=None, height=620):
 AT_VIEW = pdk.ViewState(latitude=47.6, longitude=13.4, zoom=6.3)
 
 # ------------------------------------------------------------------ sidebar: language, role, central day selection
-lang = st.sidebar.radio("🌐", list(LANGS), format_func=LANGS.get, horizontal=True,
+lang = st.sidebar.radio(t(lang, "language"), list(LANGS), format_func=LANGS.get, horizontal=True,
                         index=list(LANGS).index(CFG["app"]["default_language"]))
 role = st.sidebar.radio(t(lang, "role"), ["visitor", "analyst"], format_func=lambda r: t(lang, f"role_{r}"),
                         help=t(lang, "role_help"), key="role")
@@ -104,7 +104,7 @@ def add_data_dialog():
             if res is None:
                 st.error(st.session_state.get("api_error", "API error"))
 
-        if st.button("📂 " + t(lang, "pick_native"), type="primary", width="stretch"):
+        if st.button(t(lang, "pick_native"), type="primary", width="stretch"):
             r = api("/v1/pick_folder", timeout=620, params={"start": st.session_state.get("chosen", "~")})
             if r and r.get("path"):
                 scan_folder(r["path"])
@@ -114,9 +114,9 @@ def add_data_dialog():
         b = api("/v1/browse", params={"path": cur}) or {"path": "~", "folders": [], "parent": None}
         st.caption(t(lang, "pick_or_browse"))
         nav = st.columns([1, 6, 3], vertical_alignment="center")
-        if b.get("parent") is not None and nav[0].button("⬆", key="up", help=t(lang, "up")):
+        if b.get("parent") is not None and nav[0].button("↑", key="up", help=t(lang, "up")):
             st.session_state["browse"] = b["parent"] or "~"; st.rerun(scope="fragment")
-        nav[1].markdown(f"📁 **`{b['path']}`**" + ("  ✅ adsb.lol" if b.get("is_adsblol_day") else ""))
+        nav[1].markdown(f"**`{b['path']}`**" + ("  · adsb.lol" if b.get("is_adsblol_day") else ""))
         if nav[2].button(t(lang, "choose_folder"), width="stretch"):
             scan_folder(b["path"])
         sel = st.selectbox(t(lang, "subfolder"), b["folders"], index=None, placeholder=t(lang, "open_subfolder"), key=f"sub_{cur}")
@@ -138,11 +138,11 @@ def add_data_dialog():
                     c[0].error(r["error"]); continue
                 c[0].markdown(f"`{r['folder']}`")
                 c[1].markdown(f"**{r.get('day') or '?'}**")
-                c[2].caption(("📦 " if r.get("kind") == "archive" else "📂 ") + t(lang, "kind_" + r.get("kind", "extracted")) + " · " + r.get("note", ""))
+                c[2].caption(t(lang, "kind_" + r.get("kind", "extracted")) + " · " + r.get("note", ""))
                 if r.get("loaded"):
-                    c[3].caption("✓ " + t(lang, "already"))
+                    c[3].caption(t(lang, "already"))
                 elif not r.get("valid"):
-                    c[3].caption("✗ " + t(lang, "invalid"))
+                    c[3].caption(t(lang, "invalid"))
                 elif c[3].button(t(lang, "import_btn"), key=f"imp{i}"):
                     api(f"/v1/days/{r['day']}", method="POST", params={"source": r["folder"]})
                     st.session_state["toast"] = t(lang, "load_started"); st.rerun()
@@ -160,7 +160,7 @@ if not days:
 if st.sidebar.button("＋ " + t(lang, "add_day"), width="stretch"):
     add_data_dialog()
 if "toast" in st.session_state:
-    st.toast(st.session_state.pop("toast"), icon="⏳")
+    st.toast(st.session_state.pop("toast"))
 st.sidebar.markdown("---")
 st.sidebar.caption("Flugdatenanalyse für das BMLV · TGM 2026/27\n\nStefan Aschauer · Isaac Jerryson")
 st.sidebar.caption(t(lang, "credits"))
@@ -225,7 +225,7 @@ def chip_body(f, active):
                              format_func=lambda o: t(lang, "status_" + o), label_visibility="collapsed")
     else:
         st.caption(t(lang, f + "_hint"))
-    st.button("🗑 " + t(lang, "remove"), key=f"rm_{f}", on_click=remove_filter, args=(f,))
+    st.button(t(lang, "remove"), key=f"rm_{f}", on_click=remove_filter, args=(f,))
 
 
 with tabs[0]:
@@ -253,7 +253,7 @@ with tabs[0]:
         fvals[f] = {"f_alt": st.session_state["v_alt"], "f_speed": st.session_state["v_speed"],
                     "f_type": st.session_state["v_type"], "f_status": st.session_state["v_status"] or "all"}.get(f, True)
     st.markdown(f"""<div class="legend"><b style="color:#e9e4d8">{t(lang, "legend")}</b>
-      <span>● {t(lang, "leg_dot")}</span><span style="color:{GOLD}">━ {t(lang, "leg_trail")}</span>
+      <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#e7c27d;margin-right:5px"></span>{t(lang, "leg_dot")}</span><span style="color:{GOLD}">━ {t(lang, "leg_trail")}</span>
       <span>{t(lang, "leg_alt")}: 0 ft <span style="display:inline-block;width:140px;height:9px;border-radius:5px;vertical-align:middle;
       background:linear-gradient(90deg,rgb(80,170,255),rgb(168,186,150),rgb(255,140,45))"></span> 40.000 ft</span>
       <span>▭ {t(lang, "leg_border")}</span></div>""", unsafe_allow_html=True)
@@ -411,18 +411,18 @@ with tabs[2]:
             f = s["facts"]
             st.subheader(t(lang, "facts"))
             if "longest_flight" in f:
-                st.markdown(f'<div class="fact">✈️ {t(lang, "fact_longest", **f["longest_flight"])}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="fact">{t(lang, "fact_longest", **f["longest_flight"])}</div>', unsafe_allow_html=True)
             if "busiest_minute" in f:
                 mm = (f["busiest_minute"]["utc_minute_of_day"] + 60) % 1440
-                st.markdown(f'<div class="fact">⏱️ {t(lang, "fact_busiest", aircraft=f["busiest_minute"]["aircraft"], time=f"{mm // 60:02d}:{mm % 60:02d}")}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="fact">{t(lang, "fact_busiest", aircraft=f["busiest_minute"]["aircraft"], time=f"{mm // 60:02d}:{mm % 60:02d}")}</div>', unsafe_allow_html=True)
             if "highest" in f:
                 hv = f"{f['highest']['alt_ft']:,}".replace(",", ".")
-                st.markdown(f'<div class="fact">🏔️ {t(lang, "fact_highest", type=f["highest"]["type"], alt=hv)}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="fact">{t(lang, "fact_highest", type=f["highest"]["type"], alt=hv)}</div>', unsafe_allow_html=True)
 
 # ------------------------------------------------------------------ 4 quiz with its own live map
 with tabs[3]:
     qd = st.session_state.get("quiz_snapshot")
-    if qd is None or st.button("🔄 " + t(lang, "quiz_new")):
+    if qd is None or st.button(t(lang, "quiz_new")):
         live_now = api("/v1/live")
         st.session_state["quiz_snapshot"] = qd = live_now
         st.session_state.pop("quiz_result", None)
@@ -502,7 +502,7 @@ with tabs[5]:
     st.markdown(f"**{t(lang, 'loaded_days')}:** " + (", ".join(days) if days else "–"))
     st.markdown(f"#### {t(lang, 'jobs')}")
 
-    keys = ["stage_download", "stage_extract", "stage_parse", "stage_enrich", "stage_write", "stage_flights", "no_jobs",
+    keys = ["attempt", "stage_download", "stage_extract", "stage_parse", "stage_enrich", "stage_write", "stage_flights", "no_jobs",
             "job_done", "queued_hint", "st_running", "st_done", "st_failed", "st_queued"]
     html = (Path(__file__).parent / "pipeline_anim.html").read_text()
     components.html(html.replace("__API__", PUBLIC_API).replace("__LABELS__", json.dumps({k: t(lang, k) for k in keys}, ensure_ascii=False)),

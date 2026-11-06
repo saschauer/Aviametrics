@@ -51,7 +51,21 @@ def regions_file() -> Path | None:
     return min(cand, key=lambda p: p.stat().st_size) if cand else None
 
 
+def _guard(day: str, fn, *a, **k):
+    """Run a pipeline step; on failure show the real error (type + message) in the progress display."""
+    try:
+        return fn(*a, **k)
+    except Exception as e:
+        stage = (progress.read(day) or {}).get("stage", "download")
+        progress.report(day, stage, None, f"{type(e).__name__}: {str(e).strip().splitlines()[0][:300] if str(e).strip() else ''}", status="failed")
+        raise
+
+
 def build_positions(day: str, log=print) -> str:
+    return _guard(day, _build_positions, day, log)
+
+
+def _build_positions(day: str, log=print) -> str:
     progress.report(day, "download", 0, "")
     raw = raw_day_dir(day)
     files = trace_files(raw)
@@ -90,6 +104,10 @@ def build_positions(day: str, log=print) -> str:
 
 
 def build_flights(day: str) -> str:
+    return _guard(day, _build_flights, day)
+
+
+def _build_flights(day: str) -> str:
     """Flight segmentation: a new segment starts after more than GAP seconds without signal."""
     progress.report(day, "flights", None, "segmentation")
     con = storage.connect()

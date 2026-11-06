@@ -1,5 +1,7 @@
 """Aviametrics API (plugin system v1). Docs: http://localhost:8000/docs"""
 import os
+import re
+import time
 import subprocess
 from datetime import date
 from typing import Literal
@@ -104,15 +106,16 @@ import threading
 _queue_lock = threading.Lock()   # one pipeline run at a time – further days wait in the queue
 
 
-def _run_pipeline(day: str, source: str | None = None):
+def _run_pipeline(day: str, source: str | None = None, run: str = ""):
     with _queue_lock:
-        _run_pipeline_locked(day, source)
+        _run_pipeline_locked(day, source, run)
 
 
-def _run_pipeline_locked(day: str, source: str | None = None):
-    log = DATA / "logs" / f"{day}.log"
+def _run_pipeline_locked(day: str, source: str | None = None, run: str = ""):
+    log = DATA / "logs" / f"{day}_{run}.log"
     log.parent.mkdir(parents=True, exist_ok=True)
-    env = {**os.environ, "DAGSTER_HOME": os.environ.get("DAGSTER_HOME", str(DATA / "dagster_home"))}
+    env = {**os.environ, "DAGSTER_HOME": os.environ.get("DAGSTER_HOME", str(DATA / "dagster_home")), "AVIA_RUN_ID": run}
+    progress.report(day, "download", 0, "", run=run)
     if source:  # import an existing extracted day instead of downloading
         src = to_container(source)
         env.update(AVIA_IMPORT_DIR=str(src.parent), AVIA_IMPORT_NAME=src.name, AVIA_IMPORT_DATE=day)
@@ -121,12 +124,14 @@ def _run_pipeline_locked(day: str, source: str | None = None):
         r = subprocess.run(["dagster", "asset", "materialize", "-m", "aviametrics.pipeline.definitions",
                             "--select", "*", "--partition", day], stdout=fh, stderr=subprocess.STDOUT, cwd=ROOT, env=env)
     _jobs[day] = "done" if r.returncode == 0 else "failed"
+    cur = progress.read(day, run) or {}
     if r.returncode == 0:
-        progress.report(day, "done", 100, "ok", status="done")
-    else:
+        progress.report(day, "done", 100, "ok", status="done", run=run)
+    elif cur.get("status") != "failed":   # the pipeline did not report its own error: take the most specific log line
         lines = [l for l in log.read_text().splitlines() if l.strip()]
-        err = next((l for l in reversed(lines) if "Error" in l or "error" in l), lines[-1] if lines else "unknown error")
-        progress.report(day, (progress.read(day) or {}).get("stage", "download"), None, err[-300:], status="failed")
+        err = next((l for l in reversed(lines) if re.search(r"\w+(Error|Exception):", l) and "Materialization" not in l),
+                   lines[-1] if lines else "unknown error")
+        progress.report(day, cur.get("stage", "download"), None, err.strip()[-300:], status="failed", run=run)
 
 
 @app.post("/v1/days/{day}", summary="Load a day: runs the Dagster pipeline (download or import → positions → flights)")
@@ -135,9 +140,9 @@ def load_day(day: date, bg: BackgroundTasks, source: str | None = None):
     if _jobs.get(d) == "running":
         return {"day": d, "status": "running"}
     _jobs[d] = "running"
-    progress.path(d).unlink(missing_ok=True)
-    progress.report(d, "download", 0, "queued", status="queued")
-    bg.add_task(_run_pipeline, d, source)
+    run = time.strftime("%Y%m%d-%H%M%S")
+    progress.report(d, "download", 0, "queued", status="queued", run=run)
+    bg.add_task(_run_pipeline, d, source, run)
     return {"day": d, "status": "started"}
 
 
@@ -264,10 +269,11 @@ def browse(path: str = "~"):
 @app.get("/v1/jobs", summary="Progress of pipeline runs (newest first)")
 def jobs():
     out = []
-    for f in sorted((DATA / "logs").glob("*.progress.json"), key=lambda p: p.stat().st_mtime, reverse=True)[:5]:
-        p = progress.read(f.name.split(".")[0])
-        if p:
-            out.append(p)
+    for f in sorted((DATA / "logs").glob("*.progress.json"), key=lambda p: p.stat().st_mtime, reverse=True)[:8]:
+        try:
+            out.append(json.loads(f.read_text()))
+        except Exception:
+            pass
     return {"stages": progress.STAGES, "jobs": out}
 
 
