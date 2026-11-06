@@ -52,6 +52,7 @@ function render(j){
   const root=document.getElementById("root");
   if(!j||!j.jobs||!j.jobs.length){root.innerHTML=`<div class="empty">${L.no_jobs}</div>`;for(const k in cards)delete cards[k];return}
   if(root.querySelector(".empty"))root.innerHTML="";
+  for(const job of j.jobs){ root.appendChild(card(job.day, job.run||"").el); }   // newest attempt first (API order)
   for(const job of j.jobs){
     const c=card(job.day, job.run||""), st=job.status, idx=Math.max(0,STAGES.indexOf(job.stage));
     const done=new Set(job.done_stages||[]);

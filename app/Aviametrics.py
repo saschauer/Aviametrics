@@ -85,8 +85,15 @@ def add_data_dialog():
     st.markdown(t(lang, "workflow"))
     d1, d2 = st.tabs([t(lang, "add_download"), t(lang, "add_folder")])
     with d1:
-        rng = st.date_input(t(lang, "date_range"), value=(), max_value=date.today(), format="DD.MM.YYYY")
-        if isinstance(rng, (tuple, list)) and len(rng) >= 1:
+        mode = st.segmented_control(t(lang, "dl_mode"), ["one", "range"], default="one",
+                                    format_func=lambda m: t(lang, "dl_" + m), label_visibility="collapsed")
+        if mode == "range":
+            rng = st.date_input(t(lang, "date_range"), value=(), max_value=date.today(), format="DD.MM.YYYY")
+            rng = tuple(rng) if isinstance(rng, (tuple, list)) else (rng,)
+        else:
+            one = st.date_input(t(lang, "day"), value=None, max_value=date.today(), format="DD.MM.YYYY")
+            rng = (one,) if one else ()
+        if (mode == "range" and len(rng) == 2) or (mode != "range" and rng):
             start, end = rng[0], rng[-1]
             n = (end - start).days + 1
             st.caption(t(lang, "download_estimate", n=n, gb=f"{n * 3.3:.1f}"))
