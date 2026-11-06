@@ -28,16 +28,19 @@ def raw_day_dir(day: str) -> Path:
     tmp.mkdir(parents=True, exist_ok=True)
     parts = []
     with httpx.Client(headers=UA, follow_redirects=True, timeout=120) as c:
-        for part in ["aa", "ab", "ac", "ad"]:
-            url = CFG["sources"]["archive"].format(year=y, month=m, day=d, part=part)
-            out = tmp / f"part.{part}"
-            with c.stream("GET", url) as r:
-                if r.status_code != 200:
-                    break
-                with open(out, "wb") as fh:
-                    for chunk in r.iter_bytes(1 << 20):
-                        fh.write(chunk)
-            parts.append(out)
+        for variant in CFG["sources"].get("archive_variants", ["prod-0"]):   # fallback: prod-0 → prod-1 → staging
+            for part in ["aa", "ab", "ac", "ad"]:
+                url = CFG["sources"]["archive"].format(year=y, month=m, day=d, part=part, variant=variant)
+                out = tmp / f"part.{part}"
+                with c.stream("GET", url) as r:
+                    if r.status_code != 200:
+                        break
+                    with open(out, "wb") as fh:
+                        for chunk in r.iter_bytes(1 << 20):
+                            fh.write(chunk)
+                parts.append(out)
+            if parts:
+                break
     if not parts:
         raise RuntimeError(f"no adsb.lol archive found for {day}")
     target.mkdir(parents=True, exist_ok=True)

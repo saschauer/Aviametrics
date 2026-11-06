@@ -7,7 +7,8 @@ center = [47.7, 13.35]
 live_radius_nm = 250
 
 [sources]
-archive = "https://github.com/adsblol/globe_history_{year}/releases/download/v{year}.{month}.{day}-planes-readsb-prod-0/v{year}.{month}.{day}-planes-readsb-prod-0.tar.{part}"
+archive = "https://github.com/adsblol/globe_history_{year}/releases/download/v{year}.{month}.{day}-planes-readsb-{variant}/v{year}.{month}.{day}-planes-readsb-{variant}.tar.{part}"
+archive_variants = ["prod-0", "prod-1", "staging-0"]   # adsb.lol: 2 prod replicas + staging; staging only if prod is missing
 live = [   # fallback chain: first that answers wins
   "https://api.adsb.lol/v2/point/{lat}/{lon}/{radius}",
   "https://opendata.adsb.fi/api/v2/lat/{lat}/lon/{lon}/dist/{radius}",
