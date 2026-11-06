@@ -369,8 +369,8 @@ with tabs[1]:
                                   color_range=[[20, 30, 60], [60, 90, 150], [120, 150, 200], [217, 179, 108], [255, 140, 45], [255, 230, 180]])
                 deck([layer], AT_VIEW)
             else:
-                layer = pdk.Layer("HexagonLayer", pts, get_position=["lon", "lat"], radius=4000, elevation_scale=60, extruded=True,
-                                  coverage=0.9, pickable=True,
+                layer = pdk.Layer("HexagonLayer", pts, get_position=["lon", "lat"], radius=4000, elevation_scale=25, extruded=True,
+                                  coverage=0.85, pickable=True, upper_percentile=99, elevation_upper_percentile=99, lower_percentile=5,
                                   color_range=[[40, 60, 100], [70, 110, 160], [140, 160, 170], [217, 179, 108], [240, 150, 60], [255, 100, 40]])
                 deck([layer], pdk.ViewState(latitude=47.3, longitude=13.4, zoom=6.5, pitch=50, bearing=-15), {"text": "{elevationValue}"})
             st.caption(t(lang, f"tt_{view}_cap"))
@@ -507,6 +507,25 @@ with tabs[5]:
     if b.button("＋ " + t(lang, "add_day"), width="stretch", type="primary", key="add_data_tab"):
         add_data_dialog()
     st.markdown(f"**{t(lang, 'loaded_days')}:** " + (", ".join(days) if days else "–"))
+    if day:
+        with st.expander(f"{t(lang, 'quality')} · {day}"):
+            @st.cache_data(show_spinner=True)
+            def qual(day):
+                return api(f"/v1/quality/{day}", timeout=300)
+            qd = qual(day)
+            if qd:
+                c = st.columns(4)
+                c[0].metric(t(lang, "positions"), f"{qd['positions']:,}".replace(",", "."))
+                c[1].metric(t(lang, "aircraft"), f"{qd['aircraft']:,}".replace(",", "."))
+                c[2].metric(t(lang, "q_median"), qd["points_per_aircraft_median"])
+                c[3].metric(t(lang, "q_max"), f"{qd['points_per_aircraft_max']:,}".replace(",", "."))
+                qdf = pd.DataFrame(qd["checks"]).assign(check=lambda x: x.check.map(lambda k: t(lang, "q_" + k)))
+                st.dataframe(qdf.rename(columns={"check": t(lang, "q_check"), "count": t(lang, "q_count"), "pct": "%"}),
+                             hide_index=True, width="stretch")
+                if qd["stationary"]:
+                    st.markdown(f"**{t(lang, 'q_stationary_title')}**")
+                    st.dataframe(pd.DataFrame(qd["stationary"]), hide_index=True, width="stretch")
+                st.caption(t(lang, "q_note"))
     st.markdown(f"#### {t(lang, 'jobs')}")
 
     keys = ["attempt", "stage_download", "stage_extract", "stage_parse", "stage_enrich", "stage_write", "stage_flights", "no_jobs",

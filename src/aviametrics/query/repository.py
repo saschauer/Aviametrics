@@ -96,13 +96,53 @@ def flights(day: str):
     return storage.to_arrow(con().sql(f"SELECT * FROM {_f(day)}"))
 
 
+# ------------------------------------------------------------------ data quality
+STATIONARY = """SELECT icao FROM {src} GROUP BY icao
+                HAVING count(*) > 500 AND stddev_pop(lat) < 0.01 AND stddev_pop(lon) < 0.01"""
+
+
+def quality(day: str) -> dict:
+    """Plausibility checks for one day – basis for the cleaning rules (and the thesis)."""
+    p = _p(day)
+    r = storage.one(con(), f"""SELECT count(*), count(DISTINCT icao),
+            count(*) FILTER (WHERE alt <= 0), count(*) FILTER (WHERE alt IS NULL),
+            count(*) FILTER (WHERE alt > 50000), count(*) FILTER (WHERE gs > 700),
+            count(*) FILTER (WHERE type IS NULL OR type = ''), count(*) FILTER (WHERE mil),
+            count(*) - count(DISTINCT (icao, ts)) FROM {p}""")
+    n = max(r[0], 1)
+    per_ac = storage.one(con(), f"""SELECT count(*) FILTER (WHERE c < 5), median(c), max(c)
+                                    FROM (SELECT icao, count(*) c FROM {p} GROUP BY icao)""")
+    stationary = storage.to_records(con().sql(f"""
+        SELECT icao, any_value(type) AS type, count(*) AS positions, round(avg(lat), 4) AS lat, round(avg(lon), 4) AS lon,
+               max(alt) AS max_alt FROM {p} GROUP BY icao
+        HAVING count(*) > 500 AND stddev_pop(lat) < 0.01 AND stddev_pop(lon) < 0.01 ORDER BY positions DESC LIMIT 8"""))
+    st_n = sum(x["positions"] for x in stationary)
+    return {"positions": r[0], "aircraft": r[1],
+            "checks": [
+                {"check": "ground", "count": r[2], "pct": round(100 * r[2] / n, 1)},
+                {"check": "no_altitude", "count": r[3], "pct": round(100 * r[3] / n, 1)},
+                {"check": "alt_over_50000ft", "count": r[4], "pct": round(100 * r[4] / n, 2)},
+                {"check": "speed_over_700kt", "count": r[5], "pct": round(100 * r[5] / n, 2)},
+                {"check": "no_type", "count": r[6], "pct": round(100 * r[6] / n, 1)},
+                {"check": "military", "count": r[7], "pct": round(100 * r[7] / n, 1)},
+                {"check": "duplicates", "count": r[8], "pct": round(100 * r[8] / n, 2)},
+                {"check": "stationary_transmitters", "count": st_n, "pct": round(100 * st_n / n, 1)},
+                {"check": "aircraft_under_5_points", "count": per_ac[0], "pct": round(100 * per_ac[0] / max(r[1], 1), 1)},
+            ],
+            "points_per_aircraft_median": per_ac[1], "points_per_aircraft_max": per_ac[2], "stationary": stationary}
+
+
 # ------------------------------------------------------------------ masking (concept of Isaac's RBAC)
 def mask(value):
     return "•••" + hashlib.sha1(str(value).encode()).hexdigest()[:4] if value else value
 
 
 def heat(day: str, n: int = 250000) -> list:
-    rows = con().sql(f"SELECT lon, lat, alt FROM (SELECT lon, lat, coalesce(alt, 0) AS alt FROM {_p(day)} WHERE {IN_AT}) USING SAMPLE {int(n)} ROWS").fetchall()
+    """Airborne traffic only: ground positions and stationary transmitters would dominate the density."""
+    rows = con().sql(f"""SELECT lon, lat, alt FROM (SELECT lon, lat, coalesce(alt, 0) AS alt FROM {_p(day)}
+                         WHERE {IN_AT} AND alt > 0 AND coalesce(gs, 0) >= 40
+                           AND icao NOT IN (SELECT icao FROM ({STATIONARY.format(src=_p(day))})))
+                         USING SAMPLE {int(n)} ROWS""").fetchall()
     return [[round(a, 4), round(b, 4), c] for a, b, c in rows]
 
 

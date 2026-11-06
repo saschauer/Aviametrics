@@ -17,6 +17,10 @@ input[type=range]{flex:1;accent-color:#d9b36c}
 <div id="ctl"><button id="play">⏸</button><input id="t" type="range" min="0" max="86400" step="60" value="21600">
 <select id="speed"><option value="600">10 min/s</option><option value="1440" selected>24 min/s</option><option value="3600">1 h/s</option></select></div>
 <script>
+window.addEventListener("error",e=>{document.getElementById("count").textContent="Fehler: "+(e.message||e.type)+" "+(e.filename||"")});
+if(typeof deck==="undefined"){setTimeout(()=>{document.getElementById("count").textContent="Fehler: deck.gl konnte nicht geladen werden (unpkg.com blockiert?)"},0)}
+</script>
+<script>
 const TRIPS=__TRIPS__, GEO=__GEO__, MASK=__MASK__;
 const color=a=>{const x=Math.max(0,Math.min(1,a/40000));return[80+175*x,170+30*x-60*x*x,255-210*x]};
 TRIPS.forEach(d=>{d.c=d.mil&&MASK?[200,80,80]:color(Math.max(...d.alt))});

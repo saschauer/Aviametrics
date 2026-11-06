@@ -292,3 +292,8 @@ def pick_folder(start: str = "~"):
         return httpx.get(f"{url}/pick", params={"token": token, "start": start}, timeout=600).json()
     except Exception as e:
         return {"error": f"folder dialog helper not reachable: {e}"}
+
+
+@app.get("/v1/quality/{day}", summary="Data quality report of one day (plausibility checks)")
+def quality(day: str):
+    return repo.quality(_day(day))
