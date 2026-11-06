@@ -90,3 +90,26 @@ def to_arrow(rel):
 def to_records(rel) -> list[dict]:
     cols = [c[0] for c in rel.description] if getattr(rel, "description", None) else rel.columns
     return [dict(zip(cols, row)) for row in rel.fetchall()]
+
+
+def drop_day(con, table: str, day: str):
+    if MODE == "ducklake":
+        if _exists(con, table):
+            con.sql(f"DELETE FROM lake.{table} WHERE day = DATE '{day}'")
+    else:
+        import os
+        f = _file(table, day)
+        if os.path.exists(f):
+            os.remove(f)
+
+
+def src_days(table: str, days: list[str]) -> str:
+    """SQL fragment reading several days of a table."""
+    if len(days) == 1:
+        return src(table, days[0])
+    if MODE == "ducklake":
+        lst = ", ".join(f"DATE '{d}'" for d in days)
+        return f"(SELECT * EXCLUDE (day) FROM lake.{table} WHERE day IN ({lst}))"
+    import os
+    files = [f"'{_file(table, d)}'" for d in days if os.path.exists(_file(table, d))]
+    return f"read_parquet([{', '.join(files)}])"

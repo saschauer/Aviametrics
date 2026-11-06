@@ -165,29 +165,30 @@ if days and st.session_state.get("day") not in days:
 day = st.session_state.get("day") if days else None
 
 
-def day_picker(tab: str):
-    """Day selection inside a tab: only loaded days, synced across all tabs."""
+def period_picker(tab: str):
+    """One period selection (from/to, only loaded days) shared by all analysis tabs."""
     global day
     if not days:
         return None
-    c = st.columns([2, 2, 6], vertical_alignment="bottom")
-    c[0].selectbox(t(lang, "day"), days, index=days.index(st.session_state["day"]), key=f"day_{tab}",
-                   on_change=lambda: st.session_state.update(day=st.session_state[f"day_{tab}"]))
-    if c[1].button("+ " + t(lang, "add_day"), key=f"add_{tab}"):
+    st.session_state.setdefault("p_from", days[-1]); st.session_state.setdefault("p_to", days[-1])
+    if st.session_state["p_from"] not in days:
+        st.session_state["p_from"] = days[-1]
+    c = st.columns([2, 2, 2, 4], vertical_alignment="bottom")
+    c[0].selectbox(t(lang, "from"), days, index=days.index(st.session_state["p_from"]), key=f"pf_{tab}",
+                   on_change=lambda: st.session_state.update(p_from=st.session_state[f"pf_{tab}"]))
+    tos = [d for d in days if d >= st.session_state["p_from"]]
+    if st.session_state["p_to"] not in tos:
+        st.session_state["p_to"] = tos[0]
+    c[1].selectbox(t(lang, "to"), tos, index=tos.index(st.session_state["p_to"]), key=f"pt_{tab}_{st.session_state['p_from']}",
+                   on_change=lambda: st.session_state.update(p_to=st.session_state[f"pt_{tab}_{st.session_state['p_from']}"]))
+    if c[2].button("+ " + t(lang, "add_day"), key=f"add_{tab}"):
         add_data_dialog()
-    day = st.session_state["day"]
-    return day
-if st.sidebar.button("＋ " + t(lang, "add_day"), width="stretch"):
-    add_data_dialog()
-if "toast" in st.session_state:
-    st.toast(st.session_state.pop("toast"))
-st.sidebar.markdown("---")
-st.sidebar.caption("Flugdatenanalyse für das BMLV · TGM 2026/27\n\nStefan Aschauer · Isaac Jerryson")
-st.sidebar.caption(t(lang, "credits"))
-
-st.markdown('<p class="avia-title">AVIAMETRICS</p>', unsafe_allow_html=True)
-st.markdown(f'<p class="avia-tag">{t(lang, "tagline")}</p>', unsafe_allow_html=True)
-tabs = st.tabs([t(lang, k) for k in ["tab_live", "tab_time", "tab_numbers", "tab_guess", "tab_plugin", "tab_data", "tab_arch"]])
+    a, b = st.session_state["p_from"], st.session_state["p_to"]
+    inside = [d for d in days if a <= d <= b]
+    n_all = (date.fromisoformat(b) - date.fromisoformat(a)).days + 1
+    c[3].caption(t(lang, "period_info", n=len(inside), total=n_all))
+    day = b
+    return a, b, inside
 
 
 def need_day():
@@ -372,15 +373,13 @@ with tabs[0]:
 
 # ------------------------------------------------------------------ 2 time travel
 with tabs[1]:
-    day_picker("1")
-    if not day:
+    per = period_picker("1")
+    if not per:
         need_day()
     else:
         view = st.radio(t(lang, "tt_view"), ["anim", "heat", "hex"], horizontal=True, format_func=lambda v: t(lang, f"tt_{v}"))
         if view == "anim":
-            rc = st.columns([2, 2, 4], vertical_alignment="bottom")
-            d_from = rc[0].selectbox(t(lang, "from"), days, index=days.index(day), key="tt_from")
-            d_to = rc[1].selectbox(t(lang, "to"), [d for d in days if d >= d_from], index=0, key=f"tt_to_{d_from}")
+            d_from, d_to = per[0], per[1]
             n_days = (date.fromisoformat(d_to) - date.fromisoformat(d_from)).days + 1
             @st.cache_data(show_spinner=False)
             def trips_range(a, b):
@@ -406,10 +405,11 @@ with tabs[1]:
         else:
             area = st.segmented_control(t(lang, "area"), ["at", "all"], default="at", format_func=lambda a: t(lang, "area_" + a), key="tt_area") or "at"
 
-            @st.cache_data(show_spinner=True)
-            def heatdata(day, area):
-                return api(f"/v1/heat/{day}", params={"area": area})
-            pts = pd.DataFrame(heatdata(day, area) or [], columns=["lon", "lat", "alt"])
+            @st.cache_data(show_spinner=False)
+            def heatdata(a, b, area):
+                return api("/v1/heat_range", params={"start": a, "end": b, "area": area}, timeout=300)
+            with st.spinner(t(lang, "loading_view")):
+                pts = pd.DataFrame(heatdata(per[0], per[1], area) or [], columns=["lon", "lat", "alt"])
             if view == "heat":
                 layer = pdk.Layer("HeatmapLayer", pts, get_position=["lon", "lat"], radius_pixels=22, intensity=1.2, threshold=0.03,
                                   color_range=[[20, 30, 60], [60, 90, 150], [120, 150, 200], [217, 179, 108], [255, 140, 45], [255, 230, 180]])
@@ -423,14 +423,15 @@ with tabs[1]:
 
 # ------------------------------------------------------------------ 3 numbers
 with tabs[2]:
-    day_picker("2")
-    if not day:
+    per = period_picker("2")
+    if not per:
         need_day()
     else:
-        @st.cache_data
-        def stats(day):
-            return api(f"/v1/stats/{day}")
-        s = stats(day)
+        @st.cache_data(show_spinner=False)
+        def stats(a, b):
+            return api("/v1/stats_range", params={"start": a, "end": b}, timeout=300)
+        with st.spinner(t(lang, "loading_view")):
+            s = stats(per[0], per[1])
         if s:
             k = s["kpis"]
             c = st.columns(4)
@@ -533,11 +534,14 @@ with tabs[4]:
     plugin = Path(__file__).resolve().parents[1] / "plugins" / "co2_demo.py"
     if not day:
         need_day()
-    elif day_picker("4") and st.button(t(lang, "plugin_run"), type="primary"):
+    elif (per := period_picker("4")) and st.button(t(lang, "plugin_run"), type="primary"):
         sys.path.insert(0, str(plugin.parent))
         import co2_demo  # noqa: E402
         t0 = time.perf_counter()
-        res = co2_demo.run(API_URL, day, role)
+        parts = [co2_demo.run(API_URL, d, role) for d in per[2]]
+        res = (pd.concat(parts).groupby("type", as_index=False)
+               .agg(flights=("flights", "sum"), km=("km", "sum"), kg_co2_per_km=("kg_co2_per_km", "first"), t_co2=("t_co2", "sum"))
+               .sort_values("t_co2", ascending=False))
         st.success(f"{time.perf_counter() - t0:.1f} s")
         st.altair_chart(alt.Chart(res.head(15)).mark_bar(color=BLUE).encode(
             x=alt.X("t_co2:Q", title="t CO₂ (Demo)"), y=alt.Y("type:N", sort="-x", title=None)), width="stretch")
@@ -553,7 +557,17 @@ with tabs[5]:
     a.caption(t(lang, "data_location_help"))
     if b.button("＋ " + t(lang, "add_day"), width="stretch", type="primary", key="add_data_tab"):
         add_data_dialog()
-    st.markdown(f"**{t(lang, 'loaded_days')}:** " + (", ".join(days) if days else "–"))
+    st.markdown(f"**{t(lang, 'loaded_days')}**")
+    if not days:
+        st.caption("–")
+    for d in days:
+        c = st.columns([2, 2, 6], vertical_alignment="center")
+        c[0].markdown(f"`{d}`")
+        if st.session_state.get("confirm_del") == d:
+            if c[1].button(t(lang, "confirm_delete"), key=f"cdel_{d}", type="primary"):
+                api(f"/v1/days/{d}", method="DELETE"); st.session_state.pop("confirm_del"); st.cache_data.clear(); st.rerun()
+        elif c[1].button(t(lang, "delete"), key=f"del_{d}"):
+            st.session_state["confirm_del"] = d; st.rerun()
     if day:
         with st.expander(f"{t(lang, 'quality')} · {day}"):
             @st.cache_data(show_spinner=True)

@@ -24,24 +24,36 @@ def days() -> list[str]:
     return storage.days(con())
 
 
+def _days(day) -> list[str]:
+    return day if isinstance(day, list) else [day]
+
+
 def _p(day):
-    return storage.src("positions", day)
+    """day: one date string or a list of dates (period)."""
+    return storage.src_days("positions", _days(day))
 
 
 def _f(day):
-    return storage.src("flights", day)
+    return storage.src_days("flights", _days(day))
+
+
+def _has_flights(day) -> bool:
+    return all(storage.has(con(), "flights", d) for d in _days(day))
 
 
 def kpis(day: str) -> dict:
     n_pos, n_ac = storage.one(con(), f"SELECT count(*), count(DISTINCT icao) FROM {_p(day)} WHERE {AT}")
     km = storage.one(con(), f"""SELECT sum({HAV}) FROM (SELECT bl, lat, lon, lag(lat) OVER w plat, lag(lon) OVER w plon, ts - lag(ts) OVER w gap
                        FROM {_p(day)} WINDOW w AS (PARTITION BY icao ORDER BY ts)) WHERE gap <= {GAP} AND {AT}""")[0]
-    segs = storage.one(con(), f"SELECT count(*) FROM {_f(day)}")[0] if storage.has(con(), "flights", day) else None
+    segs = storage.one(con(), f"SELECT count(*) FROM {_f(day)}")[0] if _has_flights(day) else None
     return {"positions": n_pos, "aircraft": n_ac, "flights": segs, "km": round(km or 0)}
 
 
-def hourly(day: str, utc_offset_h: int = 1) -> list[dict]:
-    return storage.to_records(con().sql(f"""SELECT ((ts + {utc_offset_h * 3600}) % 86400) // 3600 AS hour, count(DISTINCT icao) AS aircraft
+def hourly(day, utc_offset_h: int = 1) -> list[dict]:
+    """Aircraft per hour of day (local time); for a period: average per day."""
+    n = len(_days(day))
+    return storage.to_records(con().sql(f"""SELECT ((ts + {utc_offset_h * 3600}) % 86400) // 3600 AS hour,
+                                    round(count(DISTINCT (icao, ts // 86400)) / {n}, 1) AS aircraft
                          FROM {_p(day)} WHERE {AT} GROUP BY 1 ORDER BY 1"""))
 
 
@@ -59,7 +71,7 @@ def regions(day: str) -> list[dict]:
 
 def facts(day: str) -> dict:
     out = {}
-    if storage.has(con(), "flights", day):
+    if _has_flights(day):
         r = storage.one(con(), f"SELECT coalesce(type,'?'), km, t_end - t_start FROM {_f(day)} WHERE NOT mil ORDER BY km DESC LIMIT 1")
         if r:
             out["longest_flight"] = {"type": r[0], "km": r[1], "minutes": round(r[2] / 60)}

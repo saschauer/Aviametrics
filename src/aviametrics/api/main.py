@@ -227,10 +227,17 @@ def _inspect(d: Path, host: str) -> list[dict]:
             out.append({"folder": host, "day": day, "kind": "archive", "loaded": day in loaded,
                         "valid": len(parts) >= 2, "note": f"{len(parts)} parts, {sum(p.stat().st_size for p in parts) / 1e9:.1f} GB"})
     if (d / "traces").is_dir():
+        import random
+        from collections import Counter
         files = list((d / "traces").glob("*/trace_full_*.json"))
-        tr = read_trace(str(files[0])) if files else None
-        ok = bool(tr and "icao" in tr and "trace" in tr and "timestamp" in tr)
-        day = datetime.fromtimestamp(tr["timestamp"], timezone.utc).date().isoformat() if ok else None
+        votes, ok = Counter(), False
+        for f in random.Random(0).sample(files, min(60, len(files))):   # majority vote over the middle of many traces
+            tr = read_trace(str(f))
+            if tr and "icao" in tr and "trace" in tr and "timestamp" in tr and tr["trace"]:
+                ok = True
+                mid = tr["timestamp"] + tr["trace"][len(tr["trace"]) // 2][0]
+                votes[datetime.fromtimestamp(mid, timezone.utc).date().isoformat()] += 1
+        day = votes.most_common(1)[0][0] if votes else None
         note = f"{len(files):,} trace files"
         if ok and len(files) < MIN_TRACES:
             note += " – incomplete?"
@@ -307,3 +314,40 @@ def pick_folder(start: str = "~"):
 @app.get("/v1/quality/{day}", summary="Data quality report of one day (plausibility checks)")
 def quality(day: str):
     return repo.quality(_day(day))
+
+
+@app.delete("/v1/days/{day}", summary="Delete one day (data, flights, cached views)")
+def delete_day(day: str):
+    import shutil
+    from aviametrics import storage
+    con = storage.connect()
+    for table in ("positions", "flights"):
+        storage.drop_day(con, table, day)
+    shutil.rmtree(DATA / "gold" / day, ignore_errors=True)
+    return {"deleted": day}
+
+
+def _period(start: date, end: date) -> list[str]:
+    from datetime import timedelta
+    n = (end - start).days + 1
+    if n < 1 or n > 31:
+        raise HTTPException(400, "1–31 days")
+    have = set(repo.days())
+    days = [d for d in ((start + timedelta(days=i)).isoformat() for i in range(n)) if d in have]
+    if not days:
+        raise HTTPException(404, "no data in this period")
+    return days
+
+
+@app.get("/v1/stats_range", summary="Key figures for a period (only days with data are used)")
+def stats_range(start: date, end: date):
+    d = _period(start, end)
+    return {"days": d, "kpis": repo.kpis(d), "hourly": repo.hourly(d), "types": repo.types(d), "regions": repo.regions(d), "facts": repo.facts(d)}
+
+
+@app.get("/v1/heat_range", summary="Density sample for a period (combined from the per-day cached samples)")
+def heat_range(start: date, end: date, area: Literal["at", "all"] = "at", n: int = 250000):
+    import random
+    d = _period(start, end)
+    pts = [p for day in d for p in repo.heat(day, n, area)]
+    return random.Random(0).sample(pts, min(n, len(pts)))

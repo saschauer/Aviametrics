@@ -16,10 +16,15 @@ SCHEMA = pa.schema([("icao", pa.string()), ("reg", pa.string()), ("type", pa.str
                     ("ts", pa.int64()), ("lat", pa.float64()), ("lon", pa.float64()), ("alt", pa.int32()),
                     ("gs", pa.float32()), ("track", pa.float32())])
 LAT0, LAT1, LON0, LON1 = BUFFER
+_DAY = [0, 0]   # [start, end) of the processed day in UTC epoch seconds; set before the worker pool starts
 
 
 def _num(v, f):
     return None if v is None or isinstance(v, str) else f(v)
+
+
+def _set_day(a: int, b: int):
+    _DAY[0], _DAY[1] = a, b
 
 
 def _parse(path: str):
@@ -31,6 +36,8 @@ def _parse(path: str):
     cols = [[] for _ in SCHEMA]
     for p in d.get("trace", []):
         if len(p) < 6 or p[1] is None or p[2] is None or not (LAT0 <= p[1] <= LAT1 and LON0 <= p[2] <= LON1):
+            continue
+        if _DAY[1] and not (_DAY[0] <= base + p[0] < _DAY[1]):   # day boundaries: traces can reach into the previous day
             continue
         alt = 0 if p[3] == "ground" else _num(p[3], int)
         if alt is not None and not (-1500 <= alt <= 60000):
@@ -72,8 +79,10 @@ def _build_positions(day: str, log=print) -> str:
     raw = raw_day_dir(day)
     files = trace_files(raw)
     log(f"{len(files)} trace files")
+    from datetime import datetime, timezone
+    _DAY[0] = int(datetime.fromisoformat(day).replace(tzinfo=timezone.utc).timestamp()); _DAY[1] = _DAY[0] + 86400
     parts = []
-    with Pool(max(1, (os.cpu_count() or 2) - 1)) as pool:
+    with Pool(max(1, (os.cpu_count() or 2) - 1), initializer=_set_day, initargs=(_DAY[0], _DAY[1])) as pool:
         for i, t in enumerate(pool.imap_unordered(_parse, files, chunksize=64)):
             if t is not None:
                 parts.append(t)
