@@ -163,3 +163,7 @@ q_stationary_transmitters = "Stationary transmitters (vehicles, parked aircraft)
 q_aircraft_under_5_points = "Aircraft with fewer than 5 reports"
 q_stationary_title = "Stationary transmitters – they distort density maps and are hidden there"
 q_note = "The checks show which cleaning rules are needed. Heatmap and 3D density only show airborne aircraft (altitude > 0, at least 40 kt) without stationary transmitters."
+f_mil = "Military"
+mil_all = "all"
+mil_only = "military only"
+mil_none = "without military"

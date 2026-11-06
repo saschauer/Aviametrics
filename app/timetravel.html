@@ -26,8 +26,10 @@ const color=a=>{const x=Math.max(0,Math.min(1,a/40000));return[80+175*x,170+30*x
 TRIPS.forEach(d=>{d.c=d.mil&&MASK?[200,80,80]:color(Math.max(...d.alt))});
 let t=21600,playing=true,last=performance.now();
 const tEl=document.getElementById('t'),clock=document.getElementById('clock'),count=document.getElementById('count');
-const deckgl=new deck.DeckGL({container:'map',mapStyle:'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
- initialViewState:{latitude:47.6,longitude:13.4,zoom:6.4,pitch:35,bearing:-8},controller:true});
+const map=new maplibregl.Map({container:document.getElementById('map'),style:'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
+ center:[13.4,47.6],zoom:6.4,pitch:35,bearing:-8,attributionControl:{compact:true}});
+const deckgl=new deck.MapboxOverlay({interleaved:false,layers:[]});
+map.addControl(deckgl);
 function layers(){return[
  new deck.GeoJsonLayer({id:'bl',data:GEO,stroked:true,filled:false,getLineColor:[217,179,108,110],lineWidthMinPixels:1}),
  new deck.TripsLayer({id:'trips',data:TRIPS,getPath:d=>d.path,getTimestamps:d=>d.t,getColor:d=>d.c,

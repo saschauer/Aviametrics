@@ -160,10 +160,23 @@ def add_data_dialog():
 
 
 st.sidebar.markdown("---")
-day = st.sidebar.selectbox(t(lang, "day"), days, index=len(days) - 1 if days else None,
-                           placeholder=t(lang, "no_days_short")) if days else None
-if not days:
-    st.sidebar.caption(t(lang, "no_days_short"))
+if days and st.session_state.get("day") not in days:
+    st.session_state["day"] = days[-1]
+day = st.session_state.get("day") if days else None
+
+
+def day_picker(tab: str):
+    """Day selection inside a tab: only loaded days, synced across all tabs."""
+    global day
+    if not days:
+        return None
+    c = st.columns([2, 2, 6], vertical_alignment="bottom")
+    c[0].selectbox(t(lang, "day"), days, index=days.index(st.session_state["day"]), key=f"day_{tab}",
+                   on_change=lambda: st.session_state.update(day=st.session_state[f"day_{tab}"]))
+    if c[1].button("+ " + t(lang, "add_day"), key=f"add_{tab}"):
+        add_data_dialog()
+    day = st.session_state["day"]
+    return day
 if st.sidebar.button("＋ " + t(lang, "add_day"), width="stretch"):
     add_data_dialog()
 if "toast" in st.session_state:
@@ -184,9 +197,9 @@ def need_day():
 
 
 # ------------------------------------------------------------------ 1 live radar with Notion-style filters
-FILTERS = ["f_alt", "f_speed", "f_type", "f_status", "f_at"]
+FILTERS = ["f_alt", "f_speed", "f_type", "f_status", "f_at"] + (["f_mil"] if role == "analyst" else [])
 MAX_CHIPS = 4
-DEFAULTS = {"v_alt": (0, 50000), "v_speed": (0, 700), "v_type": [], "v_status": "all"}
+DEFAULTS = {"v_alt": (0, 50000), "v_speed": (0, 700), "v_type": [], "v_status": "all", "v_mil": "all"}
 for k, v in DEFAULTS.items():
     st.session_state.setdefault(k, v)
 
@@ -201,6 +214,8 @@ def chip_label(f):
         n = len(v["v_type"]); return f"{t(lang, f)}" + (f" · {n}" if n else "")
     if f == "f_status":
         return f"{t(lang, f)} · {t(lang, 'status_' + v['v_status'])}"
+    if f == "f_mil":
+        return f"{t(lang, f)} · {t(lang, 'mil_' + (v['v_mil'] or 'all'))}"
     return t(lang, f)
 
 
@@ -227,6 +242,9 @@ def chip_body(f, active):
         opts = sorted(set(st.session_state.get("live_types", [])) | set(st.session_state["v_type"]))
         st.multiselect(t(lang, f), opts, key="v_type", placeholder=t(lang, "all_types"))
         st.caption(t(lang, "types_visible"))
+    elif f == "f_mil":
+        st.segmented_control(t(lang, f), ["all", "only", "none"], key="v_mil",
+                             format_func=lambda o: t(lang, "mil_" + o), label_visibility="collapsed")
     elif f == "f_status":
         st.segmented_control(t(lang, f), ["all", "air", "ground"], key="v_status",
                              format_func=lambda o: t(lang, "status_" + o), label_visibility="collapsed")
@@ -237,6 +255,8 @@ def chip_body(f, active):
 
 with tabs[0]:
     active = st.session_state.setdefault("filters", [])
+    if role != "analyst" and "f_mil" in active:
+        active.remove("f_mil")
     visible, hidden = active[:MAX_CHIPS], active[MAX_CHIPS:]
     row = st.columns([1.1] + [1.7] * MAX_CHIPS + [0.5, 1.0, 1.0], vertical_alignment="center")   # fixed slots: no re-layout
     view3d = row[0].toggle(t(lang, "view3d"), value=False)
@@ -258,7 +278,8 @@ with tabs[0]:
     fvals = {}
     for f in active:
         fvals[f] = {"f_alt": st.session_state["v_alt"], "f_speed": st.session_state["v_speed"],
-                    "f_type": st.session_state["v_type"], "f_status": st.session_state["v_status"] or "all"}.get(f, True)
+                    "f_type": st.session_state["v_type"], "f_status": st.session_state["v_status"] or "all",
+                    "f_mil": st.session_state["v_mil"] or "all"}.get(f, True)
     st.markdown(f"""<div class="legend"><b style="color:#e9e4d8">{t(lang, "legend")}</b>
       <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#e7c27d;margin-right:5px"></span>{t(lang, "leg_dot")}</span><span style="color:{GOLD}">━ {t(lang, "leg_trail")}</span>
       <span>{t(lang, "leg_alt")}: 0 ft <span style="display:inline-block;width:140px;height:9px;border-radius:5px;vertical-align:middle;
@@ -278,6 +299,7 @@ with tabs[0]:
         df["alt"] = pd.to_numeric(df.alt, errors="coerce").fillna(0).astype(int)
         df["gs"] = pd.to_numeric(df.gs, errors="coerce").fillna(0).round().astype(int)
         df["in_at"] = df["in_at"].astype(bool) if "in_at" in df else False
+        df["mil"] = df["mil"].astype(bool) if "mil" in df else False
         hist = st.session_state.setdefault("trails", {})
         now = time.time()
         for r in df.itertuples():
@@ -291,6 +313,10 @@ with tabs[0]:
             df = df[df.alt.between(*fvals["f_alt"])]
         if "f_speed" in fvals:
             df = df[df.gs.between(*fvals["f_speed"])]
+        if fvals.get("f_mil") == "only":
+            df = df[df.mil]
+        elif fvals.get("f_mil") == "none":
+            df = df[~df.mil]
         if fvals.get("f_status") == "air":
             df = df[df.alt > 0]
         elif fvals.get("f_status") == "ground":
@@ -344,6 +370,7 @@ with tabs[0]:
 
 # ------------------------------------------------------------------ 2 time travel
 with tabs[1]:
+    day_picker("1")
     if not day:
         need_day()
     else:
@@ -353,6 +380,13 @@ with tabs[1]:
             def trips(day, role):
                 return api(f"/v1/trips/{day}?step_s=60")
             data = trips(day, role)
+            if role == "analyst" and data:
+                mf = st.segmented_control(t(lang, "f_mil"), ["all", "only", "none"], default="all",
+                                          format_func=lambda o: t(lang, "mil_" + o), key="tt_mil")
+                if mf == "only":
+                    data = {**data, "trips": [x for x in data["trips"] if x["mil"]]}
+                elif mf == "none":
+                    data = {**data, "trips": [x for x in data["trips"] if not x["mil"]]}
             st.caption(t(lang, "play_hint"))
             if data:
                 html = (Path(__file__).parent / "timetravel.html").read_text()
@@ -377,6 +411,7 @@ with tabs[1]:
 
 # ------------------------------------------------------------------ 3 numbers
 with tabs[2]:
+    day_picker("2")
     if not day:
         need_day()
     else:
@@ -486,7 +521,7 @@ with tabs[4]:
     plugin = Path(__file__).resolve().parents[1] / "plugins" / "co2_demo.py"
     if not day:
         need_day()
-    elif st.button(t(lang, "plugin_run"), type="primary"):
+    elif day_picker("4") and st.button(t(lang, "plugin_run"), type="primary"):
         sys.path.insert(0, str(plugin.parent))
         import co2_demo  # noqa: E402
         t0 = time.perf_counter()
