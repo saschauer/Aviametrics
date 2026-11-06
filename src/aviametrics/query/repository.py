@@ -8,7 +8,8 @@ from aviametrics.config import BBOX, GAP
 
 _local = threading.local()
 LAT0, LAT1, LON0, LON1 = BBOX
-IN_AT = f"lat BETWEEN {LAT0} AND {LAT1} AND lon BETWEEN {LON0} AND {LON1}"
+IN_AT = f"lat BETWEEN {LAT0} AND {LAT1} AND lon BETWEEN {LON0} AND {LON1}"   # stored area (rectangle incl. border buffer)
+AT = "bl IS NOT NULL"   # inside Austria's national border (Bundesland assigned by point-in-polygon in the pipeline)
 HAV = ("2*6371*asin(sqrt(pow(sin(radians(lat-plat)/2),2)+cos(radians(plat))*cos(radians(lat))"
        "*pow(sin(radians(lon-plon)/2),2)))")
 
@@ -32,21 +33,21 @@ def _f(day):
 
 
 def kpis(day: str) -> dict:
-    n_pos, n_ac = storage.one(con(), f"SELECT count(*), count(DISTINCT icao) FROM {_p(day)} WHERE {IN_AT}")
-    km = storage.one(con(), f"""SELECT sum({HAV}) FROM (SELECT lat, lon, lag(lat) OVER w plat, lag(lon) OVER w plon, ts - lag(ts) OVER w gap
-                       FROM {_p(day)} WINDOW w AS (PARTITION BY icao ORDER BY ts)) WHERE gap <= {GAP} AND {IN_AT}""")[0]
+    n_pos, n_ac = storage.one(con(), f"SELECT count(*), count(DISTINCT icao) FROM {_p(day)} WHERE {AT}")
+    km = storage.one(con(), f"""SELECT sum({HAV}) FROM (SELECT bl, lat, lon, lag(lat) OVER w plat, lag(lon) OVER w plon, ts - lag(ts) OVER w gap
+                       FROM {_p(day)} WINDOW w AS (PARTITION BY icao ORDER BY ts)) WHERE gap <= {GAP} AND {AT}""")[0]
     segs = storage.one(con(), f"SELECT count(*) FROM {_f(day)}")[0] if storage.has(con(), "flights", day) else None
     return {"positions": n_pos, "aircraft": n_ac, "flights": segs, "km": round(km or 0)}
 
 
 def hourly(day: str, utc_offset_h: int = 1) -> list[dict]:
     return storage.to_records(con().sql(f"""SELECT ((ts + {utc_offset_h * 3600}) % 86400) // 3600 AS hour, count(DISTINCT icao) AS aircraft
-                         FROM {_p(day)} WHERE {IN_AT} GROUP BY 1 ORDER BY 1"""))
+                         FROM {_p(day)} WHERE {AT} GROUP BY 1 ORDER BY 1"""))
 
 
 def types(day: str, limit: int = 12) -> list[dict]:
     return storage.to_records(con().sql(f"""SELECT coalesce(type, '?') AS type, count(DISTINCT icao) AS aircraft FROM {_p(day)}
-                         WHERE {IN_AT} AND NOT mil GROUP BY 1 ORDER BY 2 DESC LIMIT {limit}"""))
+                         WHERE {AT} AND NOT mil GROUP BY 1 ORDER BY 2 DESC LIMIT {limit}"""))
 
 
 def regions(day: str) -> list[dict]:
@@ -62,10 +63,10 @@ def facts(day: str) -> dict:
         r = storage.one(con(), f"SELECT coalesce(type,'?'), km, t_end - t_start FROM {_f(day)} WHERE NOT mil ORDER BY km DESC LIMIT 1")
         if r:
             out["longest_flight"] = {"type": r[0], "km": r[1], "minutes": round(r[2] / 60)}
-    r = storage.one(con(), f"SELECT ts // 60 AS m, count(DISTINCT icao) n FROM {_p(day)} WHERE {IN_AT} GROUP BY 1 ORDER BY 2 DESC LIMIT 1")
+    r = storage.one(con(), f"SELECT ts // 60 AS m, count(DISTINCT icao) n FROM {_p(day)} WHERE {AT} GROUP BY 1 ORDER BY 2 DESC LIMIT 1")
     if r:
         out["busiest_minute"] = {"utc_minute_of_day": int(r[0] % 1440), "aircraft": r[1]}
-    r = storage.one(con(), f"SELECT coalesce(type,'?'), max(alt) FROM {_p(day)} WHERE {IN_AT} AND NOT mil GROUP BY 1 ORDER BY 2 DESC LIMIT 1")
+    r = storage.one(con(), f"SELECT coalesce(type,'?'), max(alt) FROM {_p(day)} WHERE {AT} AND NOT mil GROUP BY 1 ORDER BY 2 DESC LIMIT 1")
     if r:
         out["highest"] = {"type": r[0], "alt_ft": r[1]}
     return out
@@ -84,7 +85,7 @@ def trips(day: str, step_s: int = 30) -> dict:
 
 def positions(day: str, start: int | None = None, end: int | None = None, bbox: list[float] | None = None):
     """Arrow table of positions – the plugin data access."""
-    w = [IN_AT if bbox is None else f"lat BETWEEN {bbox[0]} AND {bbox[1]} AND lon BETWEEN {bbox[2]} AND {bbox[3]}"]
+    w = [AT if bbox is None else f"lat BETWEEN {bbox[0]} AND {bbox[1]} AND lon BETWEEN {bbox[2]} AND {bbox[3]}"]
     if start:
         w.append(f"ts >= {int(start)}")
     if end:
@@ -137,10 +138,10 @@ def mask(value):
     return "•••" + hashlib.sha1(str(value).encode()).hexdigest()[:4] if value else value
 
 
-def heat(day: str, n: int = 250000) -> list:
+def heat(day: str, n: int = 250000, area: str = "at") -> list:
     """Airborne traffic only: ground positions and stationary transmitters would dominate the density."""
     rows = con().sql(f"""SELECT lon, lat, alt FROM (SELECT lon, lat, coalesce(alt, 0) AS alt FROM {_p(day)}
-                         WHERE {IN_AT} AND alt > 0 AND coalesce(gs, 0) >= 40
+                         WHERE {AT if area == "at" else IN_AT} AND alt > 0 AND coalesce(gs, 0) >= 40
                            AND icao NOT IN (SELECT icao FROM ({STATIONARY.format(src=_p(day))})))
                          USING SAMPLE {int(n)} ROWS""").fetchall()
     return [[round(a, 4), round(b, 4), c] for a, b, c in rows]

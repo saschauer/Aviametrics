@@ -278,8 +278,9 @@ def jobs():
 
 
 @app.get("/v1/heat/{day}", summary="Sampled positions for density maps")
-def heat(day: str, n: int = 250000):
-    return repo.heat(_day(day), n)
+def heat(day: str, n: int = 250000, area: Literal["at", "all"] = "at"):
+    """area=at: inside Austria's border; area=all: whole stored area incl. border buffer."""
+    return repo.heat(_day(day), n, area)
 
 
 @app.get("/v1/pick_folder", summary="Open the native folder dialog on the user's computer (via the host helper)")

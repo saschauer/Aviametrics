@@ -394,10 +394,12 @@ with tabs[1]:
                                 .replace("__GEO__", json.dumps(bundeslaender() or {"type": "FeatureCollection", "features": []}))
                                 .replace("__MASK__", "true" if role == "visitor" else "false"), height=640)
         else:
+            area = st.segmented_control(t(lang, "area"), ["at", "all"], default="at", format_func=lambda a: t(lang, "area_" + a), key="tt_area") or "at"
+
             @st.cache_data(show_spinner=True)
-            def heatdata(day):
-                return api(f"/v1/heat/{day}")
-            pts = pd.DataFrame(heatdata(day) or [], columns=["lon", "lat", "alt"])
+            def heatdata(day, area):
+                return api(f"/v1/heat/{day}", params={"area": area})
+            pts = pd.DataFrame(heatdata(day, area) or [], columns=["lon", "lat", "alt"])
             if view == "heat":
                 layer = pdk.Layer("HeatmapLayer", pts, get_position=["lon", "lat"], radius_pixels=22, intensity=1.2, threshold=0.03,
                                   color_range=[[20, 30, 60], [60, 90, 150], [120, 150, 200], [217, 179, 108], [255, 140, 45], [255, 230, 180]])
