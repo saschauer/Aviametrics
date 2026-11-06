@@ -66,6 +66,8 @@ def build_positions(day: str, log=print) -> str:
 
 
 def _build_positions(day: str, log=print) -> str:
+    import shutil
+    shutil.rmtree(DATA / "gold" / day, ignore_errors=True)   # cached views of this day are outdated now
     progress.report(day, "download", 0, "")
     raw = raw_day_dir(day)
     files = trace_files(raw)

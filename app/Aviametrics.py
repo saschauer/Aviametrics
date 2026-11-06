@@ -355,6 +355,8 @@ with tabs[0]:
         if d.get("fetched_at") and (not stats or stats[-1]["t"] != d["fetched_at"]):
             stats.append({"t": d["fetched_at"], "ms": d.get("latency_ms"), "kb": round((d.get("bytes") or 0) / 1000), "n": len(d["aircraft"])})
             del stats[:-90]
+        if d["mode"] != "live":
+            st.warning(t(lang, "offline_warn", mode=t(lang, f"mode_{d['mode']}")))
         mode = t(lang, f"mode_{d['mode']}")
         ms = f" · {t(lang, 'latency')} {d['latency_ms']} ms" if d.get("latency_ms") is not None else ""
         st.caption(f"{t(lang, 'source')}: {d['source']} · {mode}{ms} · {len(d['aircraft'])} {t(lang, 'aircraft')} · "
@@ -376,24 +378,31 @@ with tabs[1]:
     else:
         view = st.radio(t(lang, "tt_view"), ["anim", "heat", "hex"], horizontal=True, format_func=lambda v: t(lang, f"tt_{v}"))
         if view == "anim":
-            @st.cache_data(show_spinner=True)
-            def trips(day, role):
-                return api(f"/v1/trips/{day}?step_s=60")
-            data = trips(day, role)
+            rc = st.columns([2, 2, 4], vertical_alignment="bottom")
+            d_from = rc[0].selectbox(t(lang, "from"), days, index=days.index(day), key="tt_from")
+            d_to = rc[1].selectbox(t(lang, "to"), [d for d in days if d >= d_from], index=0, key=f"tt_to_{d_from}")
+            n_days = (date.fromisoformat(d_to) - date.fromisoformat(d_from)).days + 1
+            @st.cache_data(show_spinner=False)
+            def trips_range(a, b):
+                return api("/v1/trips_range", params={"start": a, "end": b}, timeout=300)
+            if n_days > 14:
+                st.warning(t(lang, "max_days")); data = None
+            else:
+                with st.spinner(t(lang, "loading_view")):
+                    data = trips_range(d_from, d_to)
             if role == "analyst" and data:
                 mf = st.segmented_control(t(lang, "f_mil"), ["all", "only", "none"], default="all",
                                           format_func=lambda o: t(lang, "mil_" + o), key="tt_mil")
-                if mf == "only":
-                    data = {**data, "trips": [x for x in data["trips"] if x["mil"]]}
-                elif mf == "none":
-                    data = {**data, "trips": [x for x in data["trips"] if not x["mil"]]}
-            st.caption(t(lang, "play_hint"))
+                if mf in ("only", "none"):
+                    data = {**data, "trips": [x for x in data["trips"] if bool(x["m"]) == (mf == "only")]}
+            st.caption(t(lang, "play_hint") + (" " + t(lang, "gap_hint") if data and not all(d["has"] for d in data["days"]) else ""))
             if data:
                 html = (Path(__file__).parent / "timetravel.html").read_text()
-                components.html(html.replace("__TRIPS__", json.dumps(data["trips"], separators=(",", ":")))
+                labels = {"in_air": t(lang, "in_air_now"), "no_data_day": t(lang, "no_data_day")}
+                components.html(html.replace("__DATA__", json.dumps(data, separators=(",", ":")))
                                 .replace("__GEO__", json.dumps(bundeslaender() or {"type": "FeatureCollection", "features": []}))
                                 .replace("__MASK__", "true" if role == "visitor" else "false")
-                                .replace("__LBL_AIR__", json.dumps(t(lang, "in_air_now"), ensure_ascii=False)), height=640)
+                                .replace("__LABELS__", json.dumps(labels, ensure_ascii=False)), height=660)
         else:
             area = st.segmented_control(t(lang, "area"), ["at", "all"], default="at", format_func=lambda a: t(lang, "area_" + a), key="tt_area") or "at"
 

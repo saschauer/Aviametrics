@@ -72,17 +72,48 @@ def facts(day: str) -> dict:
     return out
 
 
-def trips(day: str, step_s: int = 30) -> dict:
-    """Downsampled trajectories for the time-travel animation (seconds since local midnight)."""
-    t0 = storage.one(con(), f"SELECT min(ts) - (min(ts) + 3600) % 86400 FROM {_p(day)}")[0]
-    rows = con().sql(f"""SELECT icao, bool_or(mil) AS mil, list([lon, lat] ORDER BY ts) AS path,
-                                list(ts - {t0} ORDER BY ts) AS t, list(coalesce(alt, 0) ORDER BY ts) AS alt
-                         FROM (SELECT * FROM {_p(day)}
-                               WHERE alt > 0 AND coalesce(gs, 0) >= 40       -- airborne only (no ground vehicles / parked aircraft)
-                               QUALIFY row_number() OVER (PARTITION BY icao, ts // {step_s} ORDER BY ts) = 1)
-                         GROUP BY icao HAVING count(*) > 2""").fetchall()
-    return {"t0": t0, "trips": [{"mil": r[1], "path": [[round(x, 4), round(y, 4)] for x, y in r[2]], "t": list(r[3]),
-                                 "alt": list(r[4])} for r in rows]}
+# ------------------------------------------------------------------ precomputed views ("gold" layer, cached on disk)
+def _gold(day: str, name: str, build):
+    """Serve a view from DATA/gold/<day>/<name>.json.gz; compute and store it on first use.
+    The pipeline deletes DATA/gold/<day> whenever the day is (re)imported."""
+    import gzip
+    import json
+    from aviametrics.config import DATA
+    f = DATA / "gold" / day / f"{name}.json.gz"
+    if f.exists():
+        return json.loads(gzip.decompress(f.read_bytes()))
+    data = build()
+    f.parent.mkdir(parents=True, exist_ok=True)
+    tmp = f.with_suffix(".tmp")
+    tmp.write_bytes(gzip.compress(json.dumps(data, separators=(",", ":")).encode(), 5))
+    tmp.replace(f)
+    return data
+
+
+def trips(day: str, step_s: int = 60) -> dict:
+    """Downsampled airborne trajectories (seconds since local midnight); colour only needs the max altitude."""
+    def build():
+        t0 = storage.one(con(), f"SELECT min(ts) - (min(ts) + 3600) % 86400 FROM {_p(day)}")[0]
+        rows = con().sql(f"""SELECT bool_or(mil) AS mil, list([lon, lat] ORDER BY ts) AS path,
+                                    list(ts - {t0} ORDER BY ts) AS t, max(coalesce(alt, 0)) AS a
+                             FROM (SELECT * FROM {_p(day)}
+                                   WHERE alt > 0 AND coalesce(gs, 0) >= 40       -- airborne only
+                                   QUALIFY row_number() OVER (PARTITION BY icao, ts // {step_s} ORDER BY ts) = 1)
+                             GROUP BY icao HAVING count(*) > 2""").fetchall()
+        return {"t0": t0, "trips": [{"m": int(r[0]), "p": [[round(x, 3), round(y, 3)] for x, y in r[1]],
+                                     "t": [int(v) for v in r[2]], "a": int(r[3])} for r in rows]}
+    return _gold(day, f"trips_{step_s}", build)
+
+
+def trips_range(days_wanted: list[str], step_s: int = 60) -> dict:
+    """Several days on one timeline: day i is shifted by i*86400 s; days without data stay empty."""
+    have, out, info = set(days()), [], []
+    for i, d in enumerate(days_wanted):
+        info.append({"date": d, "has": d in have})
+        if d in have:
+            for tr in trips(d, step_s)["trips"]:
+                out.append({**tr, "t": [v + i * 86400 for v in tr["t"]]})
+    return {"days": info, "span": 86400 * len(days_wanted), "trips": out}
 
 
 def positions(day: str, start: int | None = None, end: int | None = None, bbox: list[float] | None = None):
@@ -142,6 +173,10 @@ def mask(value):
 
 def heat(day: str, n: int = 250000, area: str = "at") -> list:
     """Airborne traffic only: ground positions and stationary transmitters would dominate the density."""
+    return _gold(day, f"heat_{area}_{n}", lambda: _heat(day, n, area))
+
+
+def _heat(day: str, n: int, area: str) -> list:
     rows = con().sql(f"""SELECT lon, lat, alt FROM (SELECT lon, lat, coalesce(alt, 0) AS alt FROM {_p(day)}
                          WHERE {AT if area == "at" else IN_AT} AND alt > 0 AND coalesce(gs, 0) >= 40
                            AND icao NOT IN (SELECT icao FROM ({STATIONARY.format(src=_p(day))})))

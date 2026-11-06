@@ -159,8 +159,17 @@ def stats(day: str):
     return {"kpis": repo.kpis(d), "hourly": repo.hourly(d), "types": repo.types(d), "regions": repo.regions(d), "facts": repo.facts(d)}
 
 
+@app.get("/v1/trips_range", summary="Trajectories of several days on one timeline (gaps stay empty)")
+def trips_range(start: date, end: date, step_s: int = 60):
+    from datetime import timedelta
+    n = (end - start).days + 1
+    if n < 1 or n > 14:
+        raise HTTPException(400, "1–14 days")
+    return repo.trips_range([(start + timedelta(days=i)).isoformat() for i in range(n)], step_s)
+
+
 @app.get("/v1/trips/{day}", summary="Downsampled trajectories for animation")
-def trips(day: str, step_s: int = 30, x_role: Role = Header("visitor")):
+def trips(day: str, step_s: int = 60, x_role: Role = Header("visitor")):
     data = repo.trips(_day(day), step_s)
     return data
 

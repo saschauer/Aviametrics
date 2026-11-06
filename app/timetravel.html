@@ -6,43 +6,56 @@
 <style>
 html,body{margin:0;height:100%;background:#0e1013;font-family:Georgia,serif;color:#e7c27d;overflow:hidden}
 #map{position:absolute;top:0;left:0;width:100vw;height:100vh}
-#hud{position:absolute;left:14px;top:12px;background:rgba(14,16,19,.75);padding:8px 14px;border:1px solid #6b5a33;border-radius:6px}
-#clock{font-size:34px;letter-spacing:.08em}#count{font-size:13px;color:#cfc7b6}
+#hud{position:absolute;left:14px;top:12px;background:rgba(14,16,19,.82);padding:8px 14px;border:1px solid #6b5a33;border-radius:6px;min-width:150px}
+#date{font:13px system-ui,sans-serif;color:#cfc7b6;letter-spacing:.04em}
+#clock{font-size:34px;letter-spacing:.08em;line-height:1.1}
+#count{font:12px system-ui,sans-serif;color:#cfc7b6}
+#gap{position:absolute;inset:0;display:none;align-items:center;justify-content:center;font:16px system-ui,sans-serif;color:#a9a294;pointer-events:none}
 #ctl{position:absolute;left:14px;right:14px;bottom:12px;display:flex;gap:10px;align-items:center}
+#ticks{position:absolute;left:62px;right:110px;bottom:34px;height:6px;display:flex;pointer-events:none}
+#ticks i{flex:1;border-left:1px solid #6b5a33}#ticks i.no{background:repeating-linear-gradient(90deg,#2a2620 0 4px,transparent 4px 8px)}
 button{background:#d9b36c;border:0;border-radius:5px;padding:6px 14px;font:600 14px Georgia;cursor:pointer}
 input[type=range]{flex:1;accent-color:#d9b36c}
+select{background:#15181d;color:#e9e4d8;border:1px solid #6b5a33;border-radius:4px;padding:3px}
 </style></head>
-<body><div id="map"></div>
-<div id="hud"><div id="clock">00:00</div><div id="count"></div></div>
-<div id="ctl"><button id="play">⏸</button><input id="t" type="range" min="0" max="86400" step="60" value="21600">
-<select id="speed"><option value="600">10 min/s</option><option value="1440" selected>24 min/s</option><option value="3600">1 h/s</option></select></div>
+<body><div id="map"></div><div id="gap"></div>
+<div id="hud"><div id="date"></div><div id="clock">--:--</div><div id="count"></div></div>
+<div id="ticks"></div>
+<div id="ctl"><button id="play">❚❚</button><input id="t" type="range" min="0" step="60">
+<select id="speed"><option value="600">10 min/s</option><option value="1440" selected>24 min/s</option><option value="3600">1 h/s</option><option value="7200">2 h/s</option></select></div>
 <script>
-window.addEventListener("error",e=>{document.getElementById("count").textContent="Fehler: "+(e.message||e.type)+" "+(e.filename||"")});
-if(typeof deck==="undefined"){setTimeout(()=>{document.getElementById("count").textContent="Fehler: deck.gl konnte nicht geladen werden (unpkg.com blockiert?)"},0)}
-</script>
-<script>
-const TRIPS=__TRIPS__, GEO=__GEO__, MASK=__MASK__, LBL_AIR=__LBL_AIR__;
+window.addEventListener("error",e=>{document.getElementById("count").textContent="Fehler: "+(e.message||e.type)});
+const D=__DATA__, GEO=__GEO__, MASK=__MASK__, L=__LABELS__;
+const TRIPS=D.trips, SPAN=D.span, DAYS=D.days;
 const color=a=>{const x=Math.max(0,Math.min(1,a/40000));return[80+175*x,170+30*x-60*x*x,255-210*x]};
-TRIPS.forEach(d=>{d.c=d.mil&&MASK?[200,80,80]:color(Math.max(...d.alt))});
-let t=21600,playing=true,last=performance.now();
-const tEl=document.getElementById('t'),clock=document.getElementById('clock'),count=document.getElementById('count');
+TRIPS.forEach(d=>{d.c=d.m&&MASK?[200,80,80]:color(d.a)});
+const firstDay=DAYS.findIndex(d=>d.has);
+let t=Math.max(0,firstDay)*86400+6*3600, playing=true, dragging=false, last=performance.now();
+const tEl=document.getElementById('t'); tEl.max=SPAN-60; tEl.value=t;
+document.getElementById('ticks').innerHTML=DAYS.map(d=>`<i class="${d.has?'':'no'}" title="${d.date}"></i>`).join("");
 const map=new maplibregl.Map({container:document.getElementById('map'),style:'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
  center:[13.4,47.6],zoom:6.4,pitch:35,bearing:-8,attributionControl:{compact:true}});
-const deckgl=new deck.MapboxOverlay({interleaved:false,layers:[]});
-map.addControl(deckgl);
+const overlay=new deck.MapboxOverlay({interleaved:false,layers:[]}); map.addControl(overlay);
 const fit=()=>map.resize(); map.on('load',fit); window.addEventListener('resize',fit); setTimeout(fit,150); setTimeout(fit,800);
-function layers(){return[
- new deck.GeoJsonLayer({id:'bl',data:GEO,stroked:true,filled:false,getLineColor:[217,179,108,110],lineWidthMinPixels:1}),
- new deck.TripsLayer({id:'trips',data:TRIPS,getPath:d=>d.path,getTimestamps:d=>d.t,getColor:d=>d.c,
-   widthMinPixels:2.2,trailLength:1500,currentTime:t,fadeTrail:true,capRounded:true,jointRounded:true})]}
+const fmtDate=s=>{const [y,m,d]=s.split("-");return `${d}.${m}.${y}`};
+function active(a){if(a[0]>t+300||a[a.length-1]<t-300)return false;let lo=0,hi=a.length-1;while(lo<hi){const m=(lo+hi)>>1;if(a[m]<t)lo=m+1;else hi=m}
+ return Math.abs(a[lo]-t)<=300||(lo>0&&Math.abs(a[lo-1]-t)<=300)}
 function frame(now){const dt=(now-last)/1000;last=now;
- if(playing){t=(t+dt*+document.getElementById('speed').value)%86400;tEl.value=t}
- const h=Math.floor(t/3600),m=Math.floor(t%3600/60);clock.textContent=String(h).padStart(2,'0')+':'+String(m).padStart(2,'0');
- let n=0;for(const d of TRIPS){const a=d.t;if(a[0]>t+300||a[a.length-1]<t-300)continue;let lo=0,hi=a.length-1;while(lo<hi){const m=(lo+hi)>>1;if(a[m]<t)lo=m+1;else hi=m}
- if(Math.abs(a[lo]-t)<=300||(lo>0&&Math.abs(a[lo-1]-t)<=300))n++}
- count.textContent=n.toLocaleString('de-AT')+' '+LBL_AIR;
- deckgl.setProps({layers:layers()});requestAnimationFrame(frame)}
-document.getElementById('play').onclick=e=>{playing=!playing;e.target.textContent=playing?'⏸':'▶'};
-tEl.oninput=e=>{t=+e.target.value};
+ if(playing&&!dragging){t=(t+dt*+document.getElementById('speed').value)%SPAN;tEl.value=t}
+ const di=Math.min(DAYS.length-1,Math.floor(t/86400)), sec=t-di*86400, h=Math.floor(sec/3600), m=Math.floor(sec%3600/60);
+ document.getElementById('date').textContent=fmtDate(DAYS[di].date);
+ document.getElementById('clock').textContent=String(h).padStart(2,'0')+':'+String(m).padStart(2,'0');
+ const gap=document.getElementById('gap');
+ if(!DAYS[di].has){gap.style.display="flex";gap.textContent=L.no_data_day;document.getElementById('count').textContent=""}
+ else{gap.style.display="none";let n=0;for(const d of TRIPS)if(active(d.t))n++;document.getElementById('count').textContent=n.toLocaleString('de-AT')+' '+L.in_air}
+ overlay.setProps({layers:[
+  new deck.GeoJsonLayer({id:'bl',data:GEO,stroked:true,filled:false,getLineColor:[217,179,108,110],lineWidthMinPixels:1}),
+  new deck.TripsLayer({id:'trips',data:TRIPS,getPath:d=>d.p,getTimestamps:d=>d.t,getColor:d=>d.c,
+   widthMinPixels:2.2,trailLength:1500,currentTime:t,fadeTrail:true,capRounded:true,jointRounded:true})]});
+ requestAnimationFrame(frame)}
+document.getElementById('play').onclick=e=>{playing=!playing;e.target.textContent=playing?'❚❚':'▶'};
+tEl.addEventListener('pointerdown',()=>{dragging=true});
+window.addEventListener('pointerup',()=>{dragging=false});
+tEl.addEventListener('input',e=>{t=+e.target.value});
 requestAnimationFrame(frame);
 </script></body></html>
