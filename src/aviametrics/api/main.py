@@ -24,6 +24,8 @@ app = FastAPI(title="Aviametrics API", version="0.1.0",
               description="Plugin interface of Aviametrics (showcase). Role header `X-Role: visitor|analyst` "
                           "demonstrates data masking (visitor: military aircraft and registrations masked).")
 Role = Literal["visitor", "analyst"]
+from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
+app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:8501", "http://127.0.0.1:8501"], allow_methods=["GET"])
 
 
 def _arrow_or_json(tbl: pa.Table, fmt: str):
@@ -272,3 +274,15 @@ def jobs():
 @app.get("/v1/heat/{day}", summary="Sampled positions for density maps")
 def heat(day: str, n: int = 250000):
     return repo.heat(_day(day), n)
+
+
+@app.get("/v1/pick_folder", summary="Open the native folder dialog on the user's computer (via the host helper)")
+def pick_folder(start: str = "~"):
+    import httpx
+    url, token = os.environ.get("AVIA_PICKER_URL", ""), os.environ.get("AVIA_PICKER_TOKEN", "")
+    if not url or not token:
+        return {"error": "folder dialog helper not running (start with ./start.sh; install zenity)"}
+    try:
+        return httpx.get(f"{url}/pick", params={"token": token, "start": start}, timeout=600).json()
+    except Exception as e:
+        return {"error": f"folder dialog helper not reachable: {e}"}

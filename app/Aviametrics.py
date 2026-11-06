@@ -37,9 +37,9 @@ h1,h2,h3{font-family:'Cormorant Garamond',Georgia,serif !important;letter-spacin
 </style>""", unsafe_allow_html=True)
 
 
-def api(path, method="GET", **kw):
+def api(path, method="GET", timeout=90, **kw):
     try:
-        r = httpx.request(method, f"{API_URL}{path}", headers={"X-Role": st.session_state.get("role", "visitor")}, timeout=90, **kw)
+        r = httpx.request(method, f"{API_URL}{path}", headers={"X-Role": st.session_state.get("role", "visitor")}, timeout=timeout, **kw)
         r.raise_for_status()
         return r.json()
     except Exception as e:
@@ -97,18 +97,28 @@ def add_data_dialog():
                     api(f"/v1/days/{start + timedelta(days=i)}", method="POST")
                 st.session_state["toast"] = t(lang, "load_started"); st.rerun()
     with d2:
+        def scan_folder(path):
+            st.session_state["chosen"] = path
+            res = api("/v1/scan_path", params={"path": path})
+            st.session_state["found"] = res if res is not None else []
+            if res is None:
+                st.error(st.session_state.get("api_error", "API error"))
+
+        if st.button("📂 " + t(lang, "pick_native"), type="primary", width="stretch"):
+            r = api("/v1/pick_folder", timeout=620, params={"start": st.session_state.get("chosen", "~")})
+            if r and r.get("path"):
+                scan_folder(r["path"])
+            elif r and r.get("error"):
+                st.warning(r["error"] + " – " + t(lang, "pick_fallback"))
         cur = st.session_state.setdefault("browse", "~")
         b = api("/v1/browse", params={"path": cur}) or {"path": "~", "folders": [], "parent": None}
+        st.caption(t(lang, "pick_or_browse"))
         nav = st.columns([1, 6, 3], vertical_alignment="center")
         if b.get("parent") is not None and nav[0].button("⬆", key="up", help=t(lang, "up")):
             st.session_state["browse"] = b["parent"] or "~"; st.rerun(scope="fragment")
         nav[1].markdown(f"📁 **`{b['path']}`**" + ("  ✅ adsb.lol" if b.get("is_adsblol_day") else ""))
-        if nav[2].button(t(lang, "choose_folder"), type="primary", width="stretch"):
-            st.session_state["chosen"] = b["path"]
-            res = api("/v1/scan_path", params={"path": b["path"]})
-            st.session_state["found"] = res if res is not None else []
-            if res is None:
-                st.error(st.session_state.get("api_error", "API error"))
+        if nav[2].button(t(lang, "choose_folder"), width="stretch"):
+            scan_folder(b["path"])
         sel = st.selectbox(t(lang, "subfolder"), b["folders"], index=None, placeholder=t(lang, "open_subfolder"), key=f"sub_{cur}")
         if sel:
             st.session_state["browse"] = b["path"].rstrip("/") + "/" + sel; st.rerun(scope="fragment")
@@ -409,19 +419,57 @@ with tabs[2]:
                 hv = f"{f['highest']['alt_ft']:,}".replace(",", ".")
                 st.markdown(f'<div class="fact">🏔️ {t(lang, "fact_highest", type=f["highest"]["type"], alt=hv)}</div>', unsafe_allow_html=True)
 
-# ------------------------------------------------------------------ 4 guess
+# ------------------------------------------------------------------ 4 quiz with its own live map
 with tabs[3]:
-    st.subheader(t(lang, "guess_q"))
-    g = st.number_input("guess", min_value=0, max_value=2000, value=50, step=5, label_visibility="collapsed")
-    if st.button(t(lang, "guess_btn"), type="primary"):
-        d = api("/v1/live")
-        if d:
-            real = sum(1 for a in d["aircraft"] if a.get("in_at"))
-            if real == g:
-                st.balloons(); st.success(t(lang, "guess_exact"))
-            else:
-                st.info(t(lang, "guess_off", real=real, diff=abs(real - g)))
-                if abs(real - g) <= max(3, real * 0.1):
+    qd = st.session_state.get("quiz_snapshot")
+    if qd is None or st.button("🔄 " + t(lang, "quiz_new")):
+        live_now = api("/v1/live")
+        st.session_state["quiz_snapshot"] = qd = live_now
+        st.session_state.pop("quiz_result", None)
+    if not qd:
+        st.error(t(lang, "no_api"))
+    else:
+        q = pd.DataFrame(qd["aircraft"])
+        q["alt"] = pd.to_numeric(q.alt, errors="coerce").fillna(0).astype(int)
+        q["type"] = q.type.fillna("").astype(str)
+        at_q = q[q.in_at.astype(bool)] if "in_at" in q else q.iloc[0:0]
+        m, qcol = st.columns([3, 2])
+        with m:
+            qq = at_q.assign(color=at_q.alt.map(alt_color))[["lon", "lat", "color"]]
+            deck([pdk.Layer("ScatterplotLayer", qq, get_position=["lon", "lat"], get_fill_color="color", get_radius=2500,
+                            radius_min_pixels=4, radius_max_pixels=10)], AT_VIEW, height=520)
+            st.caption(t(lang, "quiz_map"))
+        real_n = len(at_q)
+        types = at_q[(at_q.type != "") & (at_q.type != "MIL")].type.value_counts()
+        top = types.index[0] if len(types) else "A320"
+        pool = [x for x in ["A320", "B738", "A20N", "A21N", "E195", "DH8D", "A319", "B38M", "CRJ9", "AT76"] if x != top]
+        opts_type = sorted([top] + pool[:3])
+        hi = int(at_q.alt.max()) if len(at_q) else 0
+        hi_band = min(4, hi // 10000)
+        bands = ["< 10.000 ft", "10.000–20.000 ft", "20.000–30.000 ft", "30.000–40.000 ft", "> 40.000 ft"]
+        with qcol:
+            with st.form("quiz"):
+                st.markdown(f"**1.** {t(lang, 'quiz_q1')}")
+                a1 = st.number_input("q1", 0, 2000, 50, 5, label_visibility="collapsed")
+                st.markdown(f"**2.** {t(lang, 'quiz_q2')}")
+                a2 = st.radio("q2", opts_type, horizontal=True, label_visibility="collapsed", index=None)
+                st.markdown(f"**3.** {t(lang, 'quiz_q3')}")
+                a3 = st.radio("q3", bands, label_visibility="collapsed", index=None)
+                sent = st.form_submit_button(t(lang, "guess_btn"), type="primary", width="stretch")
+            if sent:
+                pts1 = 3 if abs(a1 - real_n) <= max(3, real_n * 0.1) else 2 if abs(a1 - real_n) <= real_n * 0.25 else 0
+                pts2 = 2 if a2 == top else 0
+                pts3 = 2 if a3 == bands[hi_band] else 0
+                st.session_state["quiz_result"] = (pts1 + pts2 + pts3, [
+                    t(lang, "quiz_a1", real=real_n, you=a1, pts=pts1), t(lang, "quiz_a2", real=top, pts=pts2),
+                    t(lang, "quiz_a3", real=f"{hi:,}".replace(",", "."), pts=pts3)])
+            res = st.session_state.get("quiz_result")
+            if res:
+                total, lines = res
+                st.markdown(f"### {t(lang, 'quiz_score', pts=total)}")
+                for line in lines:
+                    st.markdown(f'<div class="fact">{line}</div>', unsafe_allow_html=True)
+                if total >= 5:
                     st.balloons()
 
 # ------------------------------------------------------------------ 5 plugin lab
@@ -454,36 +502,11 @@ with tabs[5]:
     st.markdown(f"**{t(lang, 'loaded_days')}:** " + (", ".join(days) if days else "–"))
     st.markdown(f"#### {t(lang, 'jobs')}")
 
-    @st.fragment(run_every=2)
-    def jobs_view():
-        j = api("/v1/jobs")
-        if not j or not j["jobs"]:
-            st.caption(t(lang, "no_jobs")); return
-        stages = [x for x in j["stages"] if x != "done"]
-        for job in j["jobs"]:
-            with st.container(border=True):
-                status, stage = job.get("status"), job.get("stage")
-                icon = {"queued": "🕒", "running": "⏳", "done": "✅", "failed": "❌"}.get(status, "•")
-                elapsed = int(job.get("updated", 0) - job.get("started", 0))
-                st.markdown(f"{icon} **{job['day']}** · {t(lang, 'st_' + status) if status else ''} · {elapsed // 60}:{elapsed % 60:02d} min")
-                cols = st.columns(len(stages))
-                for c, sname in zip(cols, stages):
-                    if status == "done" or sname in job.get("done_stages", []):
-                        mark = "✓"
-                    elif sname == stage and status != "queued":
-                        mark = "✗" if status == "failed" else "⏳"
-                    else:
-                        mark = "·"
-                    c.markdown(f"<div style='text-align:center;font-size:.85rem'>{mark}<br>{t(lang, 'stage_' + sname)}</div>", unsafe_allow_html=True)
-                if status == "running":
-                    st.progress(min(1.0, (job.get("pct") or 0) / 100), text=job.get("msg") or "")
-                elif status == "failed":
-                    st.error(job.get("msg") or "")
-                elif status == "queued":
-                    st.caption(t(lang, "queued_hint"))
-                else:
-                    st.success(t(lang, "job_done"))
-    jobs_view()
+    keys = ["stage_download", "stage_extract", "stage_parse", "stage_enrich", "stage_write", "stage_flights", "no_jobs",
+            "job_done", "queued_hint", "st_running", "st_done", "st_failed", "st_queued"]
+    html = (Path(__file__).parent / "pipeline_anim.html").read_text()
+    components.html(html.replace("__API__", PUBLIC_API).replace("__LABELS__", json.dumps({k: t(lang, k) for k in keys}, ensure_ascii=False)),
+                    height=640, scrolling=True)
 
 # ------------------------------------------------------------------ 7 architecture
 with tabs[6]:

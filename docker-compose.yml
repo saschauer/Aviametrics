@@ -3,6 +3,7 @@ x-common: &common
   build: .
   image: aviametrics:showcase
   user: "${AVIA_UID:-1000}:${AVIA_GID:-1000}"     # files in data/ belong to you, not root
+  extra_hosts: ["host.docker.internal:host-gateway"]   # to reach the folder-dialog helper on your computer
   volumes:
     - ${AVIA_DATA_DIR:-../aviametrics-data}:/data   # storage location next to the project (change in .env)
     - ${HOME}:/host:ro                          # read-only access to your folders for auto-detection
@@ -15,6 +16,8 @@ x-common: &common
     AVIA_IMPORT_NAME: ${AVIA_IMPORT_NAME:-day}
     HOME: /data/.home                                 # DuckDB extensions, caches
     AVIA_HOST_HOME: ${HOME}
+    AVIA_PICKER_URL: http://host.docker.internal:8765
+    AVIA_PICKER_TOKEN: ${AVIA_PICKER_TOKEN:-}
     AVIA_DATA_DIR_HOST: ${AVIA_DATA_DIR:-../aviametrics-data}
   restart: unless-stopped
 

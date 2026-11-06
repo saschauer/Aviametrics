@@ -29,6 +29,14 @@ if [ -n "$IMPORT" ]; then
   export AVIA_IMPORT_DIR="$(dirname "$IMPORT")" AVIA_IMPORT_DATE="$DAY" AVIA_IMPORT_NAME="$(basename "$IMPORT")"
 fi
 export AVIA_UID="$(id -u)" AVIA_GID="$(id -g)"
+# native folder dialog helper (runs on this computer, opens zenity/kdialog for the app)
+export AVIA_PICKER_TOKEN="$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+if command -v zenity >/dev/null || command -v kdialog >/dev/null; then
+  pkill -f tools/folder_picker.py 2>/dev/null || true
+  nohup python3 tools/folder_picker.py > "$D/picker.log" 2>&1 &
+else
+  echo "Tip: install zenity for the native folder dialog:  sudo pacman -S zenity"
+fi
 
 wait_api() { for _ in $(seq 1 120); do curl -sf http://localhost:8000/v1/health >/dev/null && return 0; sleep 2; done; return 1; }
 load_day() { [ -z "$DAY" ] && return 0; echo "Loading day $DAY (progress: Dagster http://localhost:3000)"; curl -sf -X POST "http://localhost:8000/v1/days/$DAY" >/dev/null || echo "could not start pipeline"; }
@@ -37,7 +45,7 @@ banner() { echo; echo "  ✈  AVIAMETRICS is running"; echo "     App       http
 if [ "$MODE" = local ]; then
   command -v uv >/dev/null || { echo "uv missing: sudo pacman -S uv  (or https://docs.astral.sh/uv/)"; exit 1; }
   export AVIA_DATA="$(cd "$D" && pwd)" DAGSTER_HOME="$(cd "$D" && pwd)/dagster_home" PYTHONPATH="$PWD/src" AVIA_API_URL=http://localhost:8000
-  export AVIA_IMPORT_DIR="${AVIA_IMPORT_DIR:-$PWD/import}"
+  export AVIA_IMPORT_DIR="${AVIA_IMPORT_DIR:-$PWD/import}" AVIA_PICKER_URL=http://127.0.0.1:8765
   uv sync -q
   uv run uvicorn aviametrics.api.main:app --port 8000 > "$D/api.log" 2>&1 &
   uv run dagster dev -m aviametrics.pipeline.definitions -p 3000 > "$D/dagster.log" 2>&1 &
