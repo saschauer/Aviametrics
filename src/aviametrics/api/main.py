@@ -190,3 +190,19 @@ def scan(max_depth: int = 3):
                 except PermissionError:
                     pass
     return found
+
+
+@app.get("/v1/browse", summary="List sub-folders for the folder picker (read-only, inside the user's home)")
+def browse(path: str = "~"):
+    home = HOST_HOME or os.path.expanduser("~")
+    host = os.path.expanduser(path) if not HOST_HOME else (home + path[1:] if path.startswith("~") else path)
+    if not host.startswith(home):
+        host = home
+    p = to_container(host)
+    try:
+        subs = sorted(c.name for c in p.iterdir() if c.is_dir() and not c.name.startswith("."))
+    except Exception:
+        subs = []
+    rel = "~" + host[len(home):]
+    return {"path": rel or "~", "parent": "~" + os.path.dirname(host)[len(home):] if host != home else None,
+            "folders": subs, "is_adsblol_day": (p / "traces").is_dir()}

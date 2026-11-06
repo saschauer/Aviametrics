@@ -253,11 +253,34 @@ with tabs[5]:
     st.caption(t(lang, "data_location_help"))
     st.markdown(f"**{t(lang, 'loaded_days')}:** " + (", ".join(days) if days else "–"))
     home = cfg.get("host_home") or ""
-    txt = st.text_area(t(lang, "folders"), "\n".join(f.replace(home, "~", 1) if home and f.startswith(home) else f for f in cfg["folders"]),
-                       help=t(lang, "folders_help"))
+    short = lambda f: f.replace(home, "~", 1) if home and f.startswith(home) else f
+    folders = [short(f) for f in cfg["folders"]]
+    st.markdown(f"**{t(lang, 'folders')}**")
+    for i, f in enumerate(folders):
+        c = st.columns([6, 1])
+        c[0].code(f, language=None)
+        if c[1].button("✕", key=f"rm{i}"):
+            folders.pop(i)
+            api("/v1/settings", method="PUT", json={"folders": [home + x[1:] if x.startswith("~") else x for x in folders]})
+            st.rerun()
+    cur = st.session_state.setdefault("browse", "~")
+    b = api("/v1/browse", params={"path": cur}) or {"path": "~", "folders": [], "parent": None}
+    with st.container(border=True):
+        nav = st.columns([1, 6, 2])
+        if b.get("parent") is not None and nav[0].button("⬆", key="up"):
+            st.session_state["browse"] = b["parent"] or "~"; st.rerun()
+        nav[1].markdown(f"📁 `{b['path']}`" + (" · adsb.lol ✓" if b.get("is_adsblol_day") else ""))
+        if nav[2].button(t(lang, "choose_folder"), key="choose"):
+            if b["path"] not in folders:
+                folders.append(b["path"])
+            api("/v1/settings", method="PUT", json={"folders": [home + x[1:] if x.startswith("~") else x for x in folders]})
+            st.session_state["scan"] = api("/v1/scan") or []
+            st.rerun()
+        grid = st.columns(4)
+        for i, name in enumerate(b["folders"][:40]):
+            if grid[i % 4].button(f"📁 {name}", key=f"sub{i}", use_container_width=True):
+                st.session_state["browse"] = (b["path"].rstrip("/") + "/" + name); st.rerun()
     if st.button(t(lang, "scan")):
-        folders = [(home + l.strip()[1:]) if l.strip().startswith("~") and home else l.strip() for l in txt.splitlines() if l.strip()]
-        api("/v1/settings", method="PUT", json={"folders": folders})
         st.session_state["scan"] = api("/v1/scan") or []
     res = st.session_state.get("scan")
     if res is not None:

@@ -20,7 +20,7 @@ while [ $# -gt 0 ]; do
 done
 
 [ -f .env ] && set -a && . ./.env && set +a
-D="${AVIA_DATA_DIR:-./data}"; export AVIA_DATA_DIR="$D"
+D="${AVIA_DATA_DIR:-../aviametrics-data}"; mkdir -p "$D"; D="$(cd "$D" && pwd)"; export AVIA_DATA_DIR="$D"
 mkdir -p "$D/dagster_home" "$D/.home" import && touch "$D/dagster_home/dagster.yaml"
 [ -d "$D/geo" ] || git clone -q --depth 1 https://github.com/ginseng666/GeoJSON-TopoJSON-Austria "$D/geo"
 if [ -n "$IMPORT" ]; then

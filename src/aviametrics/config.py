@@ -6,7 +6,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 CFG = tomllib.loads((ROOT / "config" / os.environ.get("AVIA_PROFILE", "default.toml")).read_text())
 
-DATA = Path(os.environ.get("AVIA_DATA", ROOT / "data")).expanduser()
+DATA = Path(os.environ.get("AVIA_DATA", ROOT.parent / "aviametrics-data")).expanduser()
 IMPORT_DIR = Path(os.environ.get("AVIA_IMPORT_DIR", "/import"))          # optional: already extracted days
 IMPORT_DATE = os.environ.get("AVIA_IMPORT_DATE", "")                     # date of the extracted day
 IMPORT_NAME = os.environ.get("AVIA_IMPORT_NAME", "day")                  # folder name inside IMPORT_DIR
