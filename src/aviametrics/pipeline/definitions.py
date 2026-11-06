@@ -1,7 +1,7 @@
 """Dagster definitions: one daily partition per day of adsb.lol archive data."""
 import dagster as dg
 
-from aviametrics.config import flights_path
+from aviametrics import storage
 from aviametrics.pipeline.core import build_flights, build_positions
 
 daily = dg.DailyPartitionsDefinition(start_date="2025-01-01", end_offset=0)
@@ -20,11 +20,11 @@ def flights(context: dg.AssetExecutionContext) -> dg.MaterializeResult:
 
 @dg.asset_check(asset=flights, description="data quality: flights exist, no segment longer than 24 h, km plausible")
 def flights_plausible(context) -> dg.AssetCheckResult:
-    import duckdb, glob
-    files = glob.glob(str(flights_path("*")))
-    if not files:
-        return dg.AssetCheckResult(passed=False, metadata={"reason": "no flight files"})
-    n, too_long, max_km = duckdb.sql(f"SELECT count(*), count(*) FILTER (WHERE t_end - t_start > 86400), max(km) FROM read_parquet({files})").fetchone()
+    con = storage.connect()
+    days = storage.days(con)
+    if not days or not storage.has(con, "flights", days[-1]):
+        return dg.AssetCheckResult(passed=False, metadata={"reason": "no flights"})
+    n, too_long, max_km = con.sql(f"SELECT count(*), count(*) FILTER (WHERE t_end - t_start > 86400), max(km) FROM {storage.src('flights', days[-1])}").fetchone()
     return dg.AssetCheckResult(passed=n > 0 and too_long == 0, metadata={"segments": n, "segments_over_24h": too_long, "max_km": float(max_km or 0)})
 
 

@@ -8,7 +8,8 @@ import duckdb
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from aviametrics.config import BUFFER, GAP, flights_path, geo_dir, positions_path
+from aviametrics import storage
+from aviametrics.config import BUFFER, DATA, GAP, geo_dir
 from aviametrics.sources.adsblol import raw_day_dir, read_trace, trace_files
 
 SCHEMA = pa.schema([("icao", pa.string()), ("reg", pa.string()), ("type", pa.string()), ("mil", pa.bool_()),
@@ -58,40 +59,38 @@ def build_positions(day: str, log=print) -> str:
         parts = [t for t in pool.imap_unordered(_parse, files, chunksize=64) if t is not None]
     tbl = pa.concat_tables(parts).sort_by([("icao", "ascending"), ("ts", "ascending")])
     log(f"{tbl.num_rows} positions, {len(parts)} aircraft")
-    out = positions_path(day)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    tmp = out.with_suffix(".tmp.parquet")
+    stage = DATA / "staging"
+    stage.mkdir(parents=True, exist_ok=True)
+    tmp = stage / f"positions_{day}.parquet"
     pq.write_table(tbl, tmp, compression="zstd")
-    con = duckdb.connect()
-    try:  # enrichment: Bundesland per position
+    con = storage.connect()
+    select = f"SELECT *, NULL::VARCHAR AS bl FROM '{tmp}'"
+    try:  # enrichment: Bundesland per position (DuckDB spatial, point-in-polygon)
         con.sql("INSTALL spatial; LOAD spatial")
         f = regions_file()
         cols = [r[0] for r in con.sql(f"DESCRIBE SELECT * FROM ST_Read('{f}')").fetchall()]
         name = "name" if "name" in cols else next(c for c in cols if c != "geom")
-        con.sql(f"CREATE TABLE reg AS SELECT \"{name}\"::VARCHAR AS bl, geom FROM ST_Read('{f}')")
-        con.sql(f"""COPY (SELECT p.*, r.bl FROM '{tmp}' p LEFT JOIN reg r ON ST_Contains(r.geom, ST_Point(p.lon, p.lat))
-                         ORDER BY icao, ts) TO '{out}' (FORMAT parquet, COMPRESSION zstd)""")
-        tmp.unlink()
+        con.sql(f"CREATE TEMP TABLE reg AS SELECT \"{name}\"::VARCHAR AS bl, geom FROM ST_Read('{f}')")
+        select = (f"SELECT p.*, r.bl FROM '{tmp}' p LEFT JOIN reg r ON ST_Contains(r.geom, ST_Point(p.lon, p.lat)) "
+                  f"ORDER BY icao, ts")
     except Exception as e:
         log(f"Bundesland enrichment skipped: {e!r}")
-        con.sql(f"COPY (SELECT *, NULL::VARCHAR AS bl FROM '{tmp}') TO '{out}' (FORMAT parquet, COMPRESSION zstd)")
-        tmp.unlink()
-    return str(out)
+    target = storage.write(con, "positions", day, select)
+    tmp.unlink()
+    log(f"written {target}")
+    return target
 
 
 def build_flights(day: str) -> str:
     """Flight segmentation: a new segment starts after more than GAP seconds without signal."""
-    src, out = positions_path(day), flights_path(day)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    duckdb.connect().sql(f"""
-        COPY (
+    con = storage.connect()
+    select = f"""
           WITH d AS (SELECT *, ts - lag(ts) OVER w AS gap, lag(lat) OVER w AS plat, lag(lon) OVER w AS plon
-                     FROM '{src}' WINDOW w AS (PARTITION BY icao ORDER BY ts)),
+                     FROM {storage.src("positions", day)} WINDOW w AS (PARTITION BY icao ORDER BY ts)),
                s AS (SELECT *, sum(CASE WHEN gap IS NULL OR gap > {GAP} THEN 1 ELSE 0 END) OVER (PARTITION BY icao ORDER BY ts) AS seg FROM d)
           SELECT icao, seg, any_value(reg) AS reg, any_value(type) AS type, bool_or(mil) AS mil,
                  min(ts) AS t_start, max(ts) AS t_end, count(*) AS points, max(alt) AS max_alt,
                  round(sum(CASE WHEN gap <= {GAP} THEN 2*6371*asin(sqrt(pow(sin(radians(lat-plat)/2),2)
                    + cos(radians(plat))*cos(radians(lat))*pow(sin(radians(lon-plon)/2),2))) END), 1) AS km
-          FROM s GROUP BY icao, seg ORDER BY t_start
-        ) TO '{out}' (FORMAT parquet, COMPRESSION zstd)""")
-    return str(out)
+          FROM s GROUP BY icao, seg ORDER BY t_start"""
+    return storage.write(con, "flights", day, select)

@@ -20,3 +20,7 @@ segment_gap_s = 600          # new flight segment after 10 min without signal
 
 [app]
 default_language = "de"
+
+[storage]
+table_layer = "ducklake"     # "ducklake" (catalog + snapshots + atomic writes) or "parquet" (plain day-partitioned files)
+catalog = "sqlite"           # DuckLake catalog database: "sqlite" (several local processes) – PostgreSQL for multi-user servers

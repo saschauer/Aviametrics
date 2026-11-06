@@ -17,5 +17,7 @@ More days: in the app (Time travel → Load another day) or in Dagster (material
 Data location: `data/` in the project folder; set `AVIA_DATA` to store it elsewhere (e.g. a server disk).
 
 ## Architecture
-adsb.lol archive → Dagster assets (positions → flights) → Parquet in data/ → repository (DuckDB) → FastAPI (/v1/…, JSON + Arrow, role masking) → Streamlit app and external plugins.
+adsb.lol archive → Dagster assets (positions → flights) → DuckLake table layer (SQLite catalog, Parquet partitioned by day, atomic writes) → repository (DuckDB) → FastAPI (/v1/…, JSON + Arrow, role masking) → Streamlit app and external plugins.
 Data: adsb.lol (ODbL) · Borders: Statistik Austria via ginseng666 (CC BY 4.0) · Map tiles: © CARTO, © OpenStreetMap.
+
+Table layer switch: `config/default.toml` → `[storage] table_layer = "ducklake" | "parquet"` (only `src/aviametrics/storage.py` changes behaviour).

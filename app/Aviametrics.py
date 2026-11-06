@@ -272,7 +272,7 @@ with tabs[5]:
 # ------------------------------------------------------------------ 7 architecture
 with tabs[6]:
     st.code("""
- adsb.lol archive ──HTTPS──► [pipeline] Dagster ──Parquet──► data/ ◄──DuckDB── [api] FastAPI ◄──HTTP── [app] Streamlit ◄── you
+ adsb.lol archive ──HTTPS──► [pipeline] Dagster ──► DuckLake (SQLite catalog + Parquet, per day) ◄──DuckDB── [api] FastAPI ◄──HTTP── [app] Streamlit ◄── you
  adsb.lol / adsb.fi / airplanes.live (live, fallback chain) ──────────────────────► /v1/live    ▲
                                                                        CO₂ plugin (external) ──┘  JSON / Arrow
 """, language=None)
