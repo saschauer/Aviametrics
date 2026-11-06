@@ -98,7 +98,16 @@ def days():
 _jobs: dict = {}
 
 
+import threading
+_queue_lock = threading.Lock()   # one pipeline run at a time – further days wait in the queue
+
+
 def _run_pipeline(day: str, source: str | None = None):
+    with _queue_lock:
+        _run_pipeline_locked(day, source)
+
+
+def _run_pipeline_locked(day: str, source: str | None = None):
     log = DATA / "logs" / f"{day}.log"
     log.parent.mkdir(parents=True, exist_ok=True)
     env = {**os.environ, "DAGSTER_HOME": os.environ.get("DAGSTER_HOME", str(DATA / "dagster_home"))}
@@ -125,7 +134,7 @@ def load_day(day: date, bg: BackgroundTasks, source: str | None = None):
         return {"day": d, "status": "running"}
     _jobs[d] = "running"
     progress.path(d).unlink(missing_ok=True)
-    progress.report(d, "download", 0, "queued")
+    progress.report(d, "download", 0, "queued", status="queued")
     bg.add_task(_run_pipeline, d, source)
     return {"day": d, "status": "started"}
 
@@ -186,35 +195,52 @@ def put_settings(s: Settings):
     return s
 
 
-@app.get("/v1/scan", summary="Auto-detect extracted adsb.lol days in the configured folders")
-def scan(max_depth: int = 3, auto: bool = False):
-    """auto=true: search the whole home folder (read-only, local only, nothing leaves the computer)."""
-    found, loaded = [], set(repo.days())
-    roots = [HOST_HOME or os.path.expanduser("~")] if auto else _settings().folders
-    if auto:
-        max_depth = 5
-    for folder in roots:
-        root = to_container(folder)
-        if not root.is_dir():
-            found.append({"folder": folder, "error": "not found"}); continue
-        stack = [(root, 0)]
-        while stack:
-            d, depth = stack.pop()
-            if (d / "traces").is_dir():
-                sample = next((d / "traces").glob("*/trace_full_*.json"), None)
-                tr = read_trace(str(sample)) if sample else None
-                day = datetime.fromtimestamp(tr["timestamp"], timezone.utc).date().isoformat() if tr else None
-                host = folder.rstrip("/") + str(d)[len(str(root)):]
-                found.append({"folder": host, "day": day, "loaded": day in loaded})
-                continue
-            if depth < max_depth:
-                try:
-                    stack += [(c, depth + 1) for c in d.iterdir() if c.is_dir() and not c.name.startswith(".")
-                              and c.name not in {"node_modules", "venv", ".venv", "__pycache__", "site-packages", "aviametrics-data",
-                                                 "go", "snap", "Library", "AppData", "traces", "heatmap", "acas"}]
-                except PermissionError:
-                    pass
-    return found
+import re as _re
+TAR_RE = _re.compile(r"v(\d{4})\.(\d{2})\.(\d{2})-planes-readsb-[\w-]+\.tar\.aa$")
+MIN_TRACES = 20000
+
+
+def _inspect(d: Path, host: str) -> list[dict]:
+    """Recognise the two accepted inputs in folder d: adsb.lol archive parts (.tar.aa/.ab) or an extracted day (traces/)."""
+    out, loaded = [], set(repo.days())
+    for f in sorted(d.glob("*.tar.aa")):
+        m = TAR_RE.match(f.name)
+        if m:
+            day = "-".join(m.groups())
+            parts = sorted(d.glob(f.name[:-2] + "a?"))
+            out.append({"folder": host, "day": day, "kind": "archive", "loaded": day in loaded,
+                        "valid": len(parts) >= 2, "note": f"{len(parts)} parts, {sum(p.stat().st_size for p in parts) / 1e9:.1f} GB"})
+    if (d / "traces").is_dir():
+        files = list((d / "traces").glob("*/trace_full_*.json"))
+        tr = read_trace(str(files[0])) if files else None
+        ok = bool(tr and "icao" in tr and "trace" in tr and "timestamp" in tr)
+        day = datetime.fromtimestamp(tr["timestamp"], timezone.utc).date().isoformat() if ok else None
+        note = f"{len(files):,} trace files"
+        if ok and len(files) < MIN_TRACES:
+            note += " – incomplete?"
+        out.append({"folder": host, "day": day, "kind": "extracted", "loaded": day in loaded,
+                    "valid": ok, "note": note if ok else "traces/ found, but files are not adsb.lol/readsb traces"})
+    return out
+
+
+@app.get("/v1/scan_path", summary="Scan one folder (and sub-folders up to 3 levels) for adsb.lol days")
+def scan_path(path: str, max_depth: int = 3):
+    home = HOST_HOME or os.path.expanduser("~")
+    host = home + path[1:] if path.startswith("~") else path
+    root = to_container(host)
+    if not root.is_dir():
+        return [{"folder": path, "error": "folder not found"}]
+    found, stack = [], [(root, 0)]
+    while stack:
+        d, depth = stack.pop()
+        found += _inspect(d, host.rstrip("/") + str(d)[len(str(root)):])
+        if depth < max_depth and not (d / "traces").is_dir():
+            try:
+                stack += [(c, depth + 1) for c in d.iterdir() if c.is_dir() and not c.name.startswith(".")
+                          and c.name not in {"node_modules", ".venv", "venv", "aviametrics-data", "traces", "heatmap"}]
+            except PermissionError:
+                pass
+    return sorted(found, key=lambda r: r.get("day") or "")
 
 
 @app.get("/v1/browse", summary="List sub-folders for the folder picker (read-only, inside the user's home)")
@@ -230,7 +256,7 @@ def browse(path: str = "~"):
         subs = []
     rel = "~" + host[len(home):]
     return {"path": rel or "~", "parent": "~" + os.path.dirname(host)[len(home):] if host != home else None,
-            "folders": subs, "is_adsblol_day": (p / "traces").is_dir()}
+            "folders": subs, "is_adsblol_day": (p / "traces").is_dir() or any(p.glob("*.tar.aa"))}
 
 
 @app.get("/v1/jobs", summary="Progress of pipeline runs (newest first)")
@@ -246,15 +272,3 @@ def jobs():
 @app.get("/v1/heat/{day}", summary="Sampled positions for density maps")
 def heat(day: str, n: int = 250000):
     return repo.heat(_day(day), n)
-
-
-@app.get("/v1/scan_path", summary="Scan one folder (and its sub-folders) for extracted adsb.lol days")
-def scan_path(path: str, max_depth: int = 3):
-    home = HOST_HOME or os.path.expanduser("~")
-    host = home + path[1:] if path.startswith("~") else path
-    old = _settings().folders
-    try:
-        SETTINGS.write_text(json.dumps({"folders": [host]}))
-        return scan(max_depth=max_depth)
-    finally:
-        SETTINGS.write_text(json.dumps({"folders": sorted(set(old + [host]))}))

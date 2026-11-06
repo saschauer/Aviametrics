@@ -20,7 +20,16 @@ UA = {"User-Agent": "aviametrics/0.1 (TGM diploma project)"}
 def raw_day_dir(day: str) -> Path:
     """Return a directory with the extracted trace files of `day` (import if available, else download)."""
     if IMPORT_DATE == day and (IMPORT_DIR / IMPORT_NAME).is_dir():
-        return IMPORT_DIR / IMPORT_NAME
+        src = IMPORT_DIR / IMPORT_NAME
+        y, m, d = day.split("-")
+        parts = sorted(src.glob(f"v{y}.{m}.{d}-planes-readsb-*.tar.a?"))
+        if not parts:                       # already extracted day folder
+            return src
+        target = DATA / "raw" / day         # downloaded archive parts: extract them
+        target.mkdir(parents=True, exist_ok=True)
+        progress.report(day, "extract", None, f"{len(parts)} parts")
+        subprocess.run(f"cat {' '.join(map(str, parts))} | tar -x -C {target}", shell=True, check=True)
+        return target
     target = DATA / "raw" / day
     if target.is_dir() and any(target.rglob("trace_full_*.json")):
         return target

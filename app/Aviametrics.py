@@ -3,7 +3,7 @@ import json
 import os
 import sys
 import time
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 import altair as alt
@@ -79,57 +79,66 @@ role = st.sidebar.radio(t(lang, "role"), ["visitor", "analyst"], format_func=lam
 days = api("/v1/days") or []
 
 
-@st.dialog(" ")
-def add_day_dialog():
+@st.dialog(" ", width="large")
+def add_data_dialog():
     st.subheader(t(lang, "add_day"))
-    d1, d2, d3 = st.tabs([t(lang, "add_download"), t(lang, "add_folder"), t(lang, "add_auto")])
+    st.markdown(t(lang, "workflow"))
+    d1, d2 = st.tabs([t(lang, "add_download"), t(lang, "add_folder")])
     with d1:
-        nd = st.date_input(t(lang, "day"), value=None, max_value=date.today(), format="DD.MM.YYYY")
-        st.caption(t(lang, "download_hint"))
-        if nd and st.button(t(lang, "start_download"), type="primary"):
-            api(f"/v1/days/{nd}", method="POST"); st.session_state["toast"] = t(lang, "load_started"); st.rerun()
+        rng = st.date_input(t(lang, "date_range"), value=(), max_value=date.today(), format="DD.MM.YYYY")
+        if isinstance(rng, (tuple, list)) and len(rng) >= 1:
+            start, end = rng[0], rng[-1]
+            n = (end - start).days + 1
+            st.caption(t(lang, "download_estimate", n=n, gb=f"{n * 3.3:.1f}"))
+            if n > 14:
+                st.warning(t(lang, "max_days"))
+            elif st.button(t(lang, "start_download"), type="primary"):
+                for i in range(n):
+                    api(f"/v1/days/{start + timedelta(days=i)}", method="POST")
+                st.session_state["toast"] = t(lang, "load_started"); st.rerun()
     with d2:
-        st.caption(t(lang, "folder_hint"))
-        pth = st.text_input(t(lang, "folder_path"), value=st.session_state.get("browse", "~/"), placeholder="~/aviabench")
-        if st.button(t(lang, "scan_this"), type="primary", key="scan_path_btn"):
-            st.session_state["browse"] = pth
-            res = api("/v1/scan_path", params={"path": pth})
+        cur = st.session_state.setdefault("browse", "~")
+        b = api("/v1/browse", params={"path": cur}) or {"path": "~", "folders": [], "parent": None}
+        nav = st.columns([1, 6, 3], vertical_alignment="center")
+        if b.get("parent") is not None and nav[0].button("⬆", key="up", help=t(lang, "up")):
+            st.session_state["browse"] = b["parent"] or "~"; st.rerun(scope="fragment")
+        nav[1].markdown(f"📁 **`{b['path']}`**" + ("  ✅ adsb.lol" if b.get("is_adsblol_day") else ""))
+        if nav[2].button(t(lang, "choose_folder"), type="primary", width="stretch"):
+            st.session_state["chosen"] = b["path"]
+            res = api("/v1/scan_path", params={"path": b["path"]})
             st.session_state["found"] = res if res is not None else []
             if res is None:
                 st.error(st.session_state.get("api_error", "API error"))
-        with st.expander(t(lang, "browse")):
-            cur = st.session_state.get("browse", "~") or "~"
-            b = api("/v1/browse", params={"path": cur}) or {"path": "~", "folders": [], "parent": None}
-            c = st.columns([1, 5])
-            if b.get("parent") is not None and c[0].button("⬆", key="up"):
-                st.session_state["browse"] = b["parent"] or "~"; st.rerun(scope="fragment")
-            c[1].markdown(f"📁 `{b['path']}`" + ("  ✅ adsb.lol" if b.get("is_adsblol_day") else ""))
-            sel = st.selectbox(t(lang, "subfolder"), [""] + b["folders"], key=f"sub_{cur}")
-            if sel:
-                st.session_state["browse"] = b["path"].rstrip("/") + "/" + sel; st.rerun(scope="fragment")
-    with d3:
-        st.caption(t(lang, "auto_hint"))
-        if st.button(t(lang, "auto_btn"), type="primary"):
-            with st.spinner(t(lang, "searching")):
-                res = api("/v1/scan", params={"auto": "true"})
-            st.session_state["found"] = res if res is not None else []
-            if res is None:
-                st.error(st.session_state.get("api_error", "API error"))
-    found = st.session_state.get("found")
-    if found is not None:
-        st.markdown("---")
-        if not found:
-            st.info(t(lang, "found_none"))
-        for i, r in enumerate(found):
-            c = st.columns([4, 2, 2])
-            c[0].markdown(f"`{r['folder']}`")
-            if r.get("error"):
-                c[1].error(r["error"]); continue
-            c[1].markdown(f"**{r.get('day') or '?'}**")
-            if r.get("loaded"):
-                c[2].caption(t(lang, "already"))
-            elif r.get("day") and c[2].button(t(lang, "import_btn"), key=f"imp{i}"):
-                api(f"/v1/days/{r['day']}", method="POST", params={"source": r["folder"]})
+        sel = st.selectbox(t(lang, "subfolder"), b["folders"], index=None, placeholder=t(lang, "open_subfolder"), key=f"sub_{cur}")
+        if sel:
+            st.session_state["browse"] = b["path"].rstrip("/") + "/" + sel; st.rerun(scope="fragment")
+        with st.expander(t(lang, "folder_path")):
+            pth = st.text_input(t(lang, "folder_path"), placeholder="~/aviabench", label_visibility="collapsed")
+            if pth and st.button(t(lang, "go"), key="go_path"):
+                st.session_state["browse"] = pth; st.rerun(scope="fragment")
+        found = st.session_state.get("found")
+        if found is not None:
+            st.markdown(f"**{t(lang, 'found_in')} `{st.session_state.get('chosen', '')}`**")
+            if not found:
+                st.info(t(lang, "found_none"))
+            importable = [r for r in found if r.get("valid") and r.get("day") and not r.get("loaded")]
+            for i, r in enumerate(found):
+                c = st.columns([4, 2, 3, 2], vertical_alignment="center")
+                if r.get("error"):
+                    c[0].error(r["error"]); continue
+                c[0].markdown(f"`{r['folder']}`")
+                c[1].markdown(f"**{r.get('day') or '?'}**")
+                c[2].caption(("📦 " if r.get("kind") == "archive" else "📂 ") + t(lang, "kind_" + r.get("kind", "extracted")) + " · " + r.get("note", ""))
+                if r.get("loaded"):
+                    c[3].caption("✓ " + t(lang, "already"))
+                elif not r.get("valid"):
+                    c[3].caption("✗ " + t(lang, "invalid"))
+                elif c[3].button(t(lang, "import_btn"), key=f"imp{i}"):
+                    api(f"/v1/days/{r['day']}", method="POST", params={"source": r["folder"]})
+                    st.session_state["toast"] = t(lang, "load_started"); st.rerun()
+            if len(importable) > 1 and st.button(t(lang, "import_all", n=len(importable)), type="primary"):
+                for r in importable:
+                    api(f"/v1/days/{r['day']}", method="POST", params={"source": r["folder"]})
                 st.session_state["toast"] = t(lang, "load_started"); st.rerun()
 
 
@@ -139,7 +148,7 @@ day = st.sidebar.selectbox(t(lang, "day"), days, index=len(days) - 1 if days els
 if not days:
     st.sidebar.caption(t(lang, "no_days_short"))
 if st.sidebar.button("＋ " + t(lang, "add_day"), width="stretch"):
-    add_day_dialog()
+    add_data_dialog()
 if "toast" in st.session_state:
     st.toast(st.session_state.pop("toast"), icon="⏳")
 st.sidebar.markdown("---")
@@ -154,13 +163,13 @@ tabs = st.tabs([t(lang, k) for k in ["tab_live", "tab_time", "tab_numbers", "tab
 def need_day():
     st.info(t(lang, "no_days"))
     if st.button("＋ " + t(lang, "add_day"), key=f"nd{time.time_ns()}"):
-        add_day_dialog()
+        add_data_dialog()
 
 
 # ------------------------------------------------------------------ 1 live radar with Notion-style filters
-FILTERS = ["f_alt", "f_speed", "f_type", "f_at", "f_ground"]
+FILTERS = ["f_alt", "f_speed", "f_type", "f_status", "f_at"]
 MAX_CHIPS = 4
-DEFAULTS = {"v_alt": (0, 50000), "v_speed": (0, 700), "v_type": []}
+DEFAULTS = {"v_alt": (0, 50000), "v_speed": (0, 700), "v_type": [], "v_status": "all"}
 for k, v in DEFAULTS.items():
     st.session_state.setdefault(k, v)
 
@@ -173,6 +182,8 @@ def chip_label(f):
         lo, hi = v["v_speed"]; return f"{t(lang, f)} · {lo}–{hi} kt"
     if f == "f_type":
         n = len(v["v_type"]); return f"{t(lang, f)}" + (f" · {n}" if n else "")
+    if f == "f_status":
+        return f"{t(lang, f)} · {t(lang, 'status_' + v['v_status'])}"
     return t(lang, f)
 
 
@@ -196,7 +207,12 @@ def chip_body(f, active):
     elif f == "f_speed":
         st.slider(t(lang, f), 0, 700, step=10, format="%d kt", key="v_speed")
     elif f == "f_type":
-        st.multiselect(t(lang, f), st.session_state.get("live_types", []), key="v_type", placeholder=t(lang, "all_types"))
+        opts = sorted(set(st.session_state.get("live_types", [])) | set(st.session_state["v_type"]))
+        st.multiselect(t(lang, f), opts, key="v_type", placeholder=t(lang, "all_types"))
+        st.caption(t(lang, "types_visible"))
+    elif f == "f_status":
+        st.segmented_control(t(lang, f), ["all", "air", "ground"], key="v_status",
+                             format_func=lambda o: t(lang, "status_" + o), label_visibility="collapsed")
     else:
         st.caption(t(lang, f + "_hint"))
     st.button("🗑 " + t(lang, "remove"), key=f"rm_{f}", on_click=remove_filter, args=(f,))
@@ -205,20 +221,17 @@ def chip_body(f, active):
 with tabs[0]:
     active = st.session_state.setdefault("filters", [])
     visible, hidden = active[:MAX_CHIPS], active[MAX_CHIPS:]
-    widths = [1.1] + [1.7] * len(visible) + ([0.6] if hidden else []) + [1.0, max(0.1, 8 - 1.7 * len(visible))]
-    row = st.columns(widths, vertical_alignment="center")
+    row = st.columns([1.1] + [1.7] * MAX_CHIPS + [0.5, 1.0, 1.0], vertical_alignment="center")   # fixed slots: no re-layout
     view3d = row[0].toggle(t(lang, "view3d"), value=False)
     for c, f in zip(row[1:1 + len(visible)], visible):
         with c.popover(chip_label(f), width="stretch"):
             chip_body(f, active)
-    i = 1 + len(visible)
     if hidden:
-        with row[i].popover("…", width="stretch"):
+        with row[1 + MAX_CHIPS].popover("…", width="stretch"):
             for f in hidden:
                 with st.expander(chip_label(f)):
                     chip_body(f, active)
-        i += 1
-    with row[i].popover("＋ Filter", width="stretch"):
+    with row[2 + MAX_CHIPS].popover("＋ Filter", width="stretch"):
         q = st.text_input(t(lang, "search"), placeholder=t(lang, "search_filters"), label_visibility="collapsed")
         avail = [f for f in FILTERS if f not in active and q.lower() in t(lang, f).lower()]
         for f in avail:
@@ -228,7 +241,7 @@ with tabs[0]:
     fvals = {}
     for f in active:
         fvals[f] = {"f_alt": st.session_state["v_alt"], "f_speed": st.session_state["v_speed"],
-                    "f_type": st.session_state["v_type"]}.get(f, True)
+                    "f_type": st.session_state["v_type"], "f_status": st.session_state["v_status"] or "all"}.get(f, True)
     st.markdown(f"""<div class="legend"><b style="color:#e9e4d8">{t(lang, "legend")}</b>
       <span>● {t(lang, "leg_dot")}</span><span style="color:{GOLD}">━ {t(lang, "leg_trail")}</span>
       <span>{t(lang, "leg_alt")}: 0 ft <span style="display:inline-block;width:140px;height:9px;border-radius:5px;vertical-align:middle;
@@ -248,7 +261,6 @@ with tabs[0]:
         df["alt"] = pd.to_numeric(df.alt, errors="coerce").fillna(0).astype(int)
         df["gs"] = pd.to_numeric(df.gs, errors="coerce").fillna(0).round().astype(int)
         df["in_at"] = df["in_at"].astype(bool) if "in_at" in df else False
-        st.session_state["live_types"] = sorted(x for x in df.type.unique() if x)
         hist = st.session_state.setdefault("trails", {})
         now = time.time()
         for r in df.itertuples():
@@ -262,13 +274,16 @@ with tabs[0]:
             df = df[df.alt.between(*fvals["f_alt"])]
         if "f_speed" in fvals:
             df = df[df.gs.between(*fvals["f_speed"])]
+        if fvals.get("f_status") == "air":
+            df = df[df.alt > 0]
+        elif fvals.get("f_status") == "ground":
+            df = df[df.alt <= 0]
+        if "f_at" in fvals:
+            df = df[df.in_at]
+        st.session_state["live_types"] = sorted(x for x in df.type.unique() if x and x != "MIL")   # facets: types after the other filters
         if fvals.get("f_type"):
             df = df[df.type.isin(fvals["f_type"])]
-        if "f_ground" in fvals:
-            df = df[df.alt > 0]
         at = df[df.in_at]
-        if "f_at" in fvals:
-            df = at
         df = df.assign(color=df.alt.map(alt_color), alt_m=df.alt * 0.3048 * (3 if view3d else 0))
         df = df[["icao", "flight", "type", "reg", "lat", "lon", "alt", "gs", "alt_m", "color"]]
         left, right = st.columns([3, 1])
@@ -435,7 +450,7 @@ with tabs[5]:
     a.markdown(f"**{t(lang, 'data_location')}:** `{cfg['data_dir']}`")
     a.caption(t(lang, "data_location_help"))
     if b.button("＋ " + t(lang, "add_day"), width="stretch", type="primary", key="add_data_tab"):
-        add_day_dialog()
+        add_data_dialog()
     st.markdown(f"**{t(lang, 'loaded_days')}:** " + (", ".join(days) if days else "–"))
     st.markdown(f"#### {t(lang, 'jobs')}")
 
@@ -448,14 +463,14 @@ with tabs[5]:
         for job in j["jobs"]:
             with st.container(border=True):
                 status, stage = job.get("status"), job.get("stage")
-                icon = {"running": "⏳", "done": "✅", "failed": "❌"}.get(status, "•")
+                icon = {"queued": "🕒", "running": "⏳", "done": "✅", "failed": "❌"}.get(status, "•")
                 elapsed = int(job.get("updated", 0) - job.get("started", 0))
                 st.markdown(f"{icon} **{job['day']}** · {t(lang, 'st_' + status) if status else ''} · {elapsed // 60}:{elapsed % 60:02d} min")
                 cols = st.columns(len(stages))
                 for c, sname in zip(cols, stages):
                     if status == "done" or sname in job.get("done_stages", []):
                         mark = "✓"
-                    elif sname == stage:
+                    elif sname == stage and status != "queued":
                         mark = "✗" if status == "failed" else "⏳"
                     else:
                         mark = "·"
@@ -464,6 +479,8 @@ with tabs[5]:
                     st.progress(min(1.0, (job.get("pct") or 0) / 100), text=job.get("msg") or "")
                 elif status == "failed":
                     st.error(job.get("msg") or "")
+                elif status == "queued":
+                    st.caption(t(lang, "queued_hint"))
                 else:
                     st.success(t(lang, "job_done"))
     jobs_view()
