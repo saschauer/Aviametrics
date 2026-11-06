@@ -82,10 +82,13 @@ def live_snapshot() -> dict:
     for url in CFG["sources"]["live"]:
         u = url.format(lat=lat, lon=lon, radius=CFG["area"]["live_radius_nm"])
         try:
+            t0 = time.perf_counter()
             r = httpx.get(u, headers=UA, timeout=6)
             r.raise_for_status()
+            latency = round((time.perf_counter() - t0) * 1000)
             d = r.json()
-            data = {"ac": d.get("ac") or d.get("aircraft") or [], "source": u.split("/")[2], "mode": "live"}
+            data = {"ac": d.get("ac") or d.get("aircraft") or [], "source": u.split("/")[2], "mode": "live",
+                    "latency_ms": latency, "bytes": len(r.content), "fetched_at": time.time()}
             _cache.update(t=time.time(), data=data)
             return data
         except Exception:

@@ -77,7 +77,14 @@ def live(x_role: Role = Header("visitor")):
             if mil:
                 rec.update(icao=repo.mask(rec["icao"]), flight="MIL", type="MIL")
         out.append(rec)
-    return {"source": snap["source"], "mode": snap["mode"], "aircraft": out, "bbox_core": BBOX}
+    try:
+        inside = repo.in_austria([r["lon"] for r in out], [r["lat"] for r in out])
+    except Exception:
+        inside = set()
+    for i, r in enumerate(out):
+        r["in_at"] = i in inside
+    return {"source": snap["source"], "mode": snap["mode"], "aircraft": out, "bbox_core": BBOX,
+            "latency_ms": snap.get("latency_ms"), "bytes": snap.get("bytes"), "fetched_at": snap.get("fetched_at")}
 
 
 @app.get("/v1/days", summary="Days available in storage")
@@ -177,9 +184,13 @@ def put_settings(s: Settings):
 
 
 @app.get("/v1/scan", summary="Auto-detect extracted adsb.lol days in the configured folders")
-def scan(max_depth: int = 3):
+def scan(max_depth: int = 3, auto: bool = False):
+    """auto=true: search the whole home folder (read-only, local only, nothing leaves the computer)."""
     found, loaded = [], set(repo.days())
-    for folder in _settings().folders:
+    roots = [HOST_HOME or os.path.expanduser("~")] if auto else _settings().folders
+    if auto:
+        max_depth = 4
+    for folder in roots:
         root = to_container(folder)
         if not root.is_dir():
             found.append({"folder": folder, "error": "not found"}); continue
@@ -195,7 +206,8 @@ def scan(max_depth: int = 3):
                 continue
             if depth < max_depth:
                 try:
-                    stack += [(c, depth + 1) for c in d.iterdir() if c.is_dir() and not c.name.startswith(".")]
+                    stack += [(c, depth + 1) for c in d.iterdir() if c.is_dir() and not c.name.startswith(".")
+                              and c.name not in {"node_modules", "venv", ".venv", "__pycache__", "site-packages", "aviametrics-data"}]
                 except PermissionError:
                     pass
     return found
@@ -230,3 +242,15 @@ def jobs():
 @app.get("/v1/heat/{day}", summary="Sampled positions for density maps")
 def heat(day: str, n: int = 250000):
     return repo.heat(_day(day), n)
+
+
+@app.get("/v1/scan_path", summary="Scan one folder (and its sub-folders) for extracted adsb.lol days")
+def scan_path(path: str, max_depth: int = 3):
+    home = HOST_HOME or os.path.expanduser("~")
+    host = home + path[1:] if path.startswith("~") else path
+    old = _settings().folders
+    try:
+        SETTINGS.write_text(json.dumps({"folders": [host]}))
+        return scan(max_depth=max_depth)
+    finally:
+        SETTINGS.write_text(json.dumps({"folders": sorted(set(old + [host]))}))

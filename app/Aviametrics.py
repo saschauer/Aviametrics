@@ -1,9 +1,9 @@
 """Aviametrics – Streamlit front end. Talks ONLY to the API (never directly to the data)."""
 import json
 import os
-import random
 import sys
 import time
+from datetime import date
 from pathlib import Path
 
 import altair as alt
@@ -18,49 +18,36 @@ from aviametrics.config import API_URL, CFG, DATA  # noqa: E402
 from aviametrics.i18n import LANGS, t  # noqa: E402
 
 PUBLIC_API = os.environ.get("AVIA_PUBLIC_API", "http://localhost:8000")
-LAT0, LAT1, LON0, LON1 = CFG["area"]["bbox_core"]
+GOLD, BLUE = "#d9b36c", "#7fa7c9"
 st.set_page_config(page_title="Aviametrics", page_icon="✈️", layout="wide")
 st.markdown("""<style>
 @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&display=swap');
 .block-container{padding-top:1.4rem;max-width:1600px}
 header[data-testid="stHeader"],#MainMenu,footer,[data-testid="stToolbar"],[data-testid="stDecoration"]{display:none !important}
+h1,h2,h3{font-family:'Cormorant Garamond',Georgia,serif !important;letter-spacing:.04em}
+.avia-title{font-family:'Cormorant Garamond',Georgia,serif;font-size:2.4rem;letter-spacing:.24em;color:#d9b36c;margin:0}
+.avia-tag{color:#a9a294;margin-top:-6px}
 .stTabs [data-baseweb="tab"]{font-family:'Cormorant Garamond',Georgia,serif;font-size:1.15rem;letter-spacing:.06em}
 [data-testid="stMetric"]{background:#15181d;border:1px solid #3a3222;border-radius:8px;padding:10px 14px}
 [data-testid="stMetricLabel"]{color:#a9a294}
-h1,h2,h3{font-family:'Cormorant Garamond',Georgia,serif !important;letter-spacing:.04em}
-.avia-title{font-family:'Cormorant Garamond',Georgia,serif;font-size:2.6rem;letter-spacing:.22em;color:#d9b36c;margin:0}
-.avia-tag{color:#a9a294;margin-top:-6px}
-[data-testid="stMetricValue"]{font-family:'Cormorant Garamond',Georgia,serif;font-size:2.3rem;color:#e7c27d}
+[data-testid="stMetricValue"]{font-family:'Cormorant Garamond',Georgia,serif;font-size:2.2rem;color:#e7c27d}
 .fact{border-left:3px solid #d9b36c;padding:6px 12px;margin:8px 0;background:rgba(217,179,108,.08);border-radius:4px}
+.legend{display:flex;gap:18px;align-items:center;flex-wrap:wrap;font-size:.85rem;color:#a9a294;margin:2px 0 8px}
+.chip{display:inline-block;border:1px solid #6b5a33;border-radius:14px;padding:2px 10px;margin:0 6px 4px 0;color:#e9e4d8;font-size:.85rem}
 </style>""", unsafe_allow_html=True)
-
-# ------------------------------------------------------------------ sidebar
-lang = st.sidebar.radio("🌐", list(LANGS), format_func=LANGS.get, horizontal=True,
-                        index=list(LANGS).index(CFG["app"]["default_language"]))
-role = st.sidebar.radio(t(lang, "role"), ["visitor", "analyst"], format_func=lambda r: t(lang, f"role_{r}"),
-                        help=t(lang, "role_help"))
-st.sidebar.markdown("---")
-st.sidebar.caption("Flugdatenanalyse für das BMLV · TGM 2026/27\n\nStefan Aschauer · Isaac Jerryson")
-st.sidebar.caption(t(lang, "credits"))
-H = {"X-Role": role}
 
 
 def api(path, method="GET", **kw):
     try:
-        r = httpx.request(method, f"{API_URL}{path}", headers=H, timeout=60, **kw)
+        r = httpx.request(method, f"{API_URL}{path}", headers={"X-Role": st.session_state.get("role", "visitor")}, timeout=90, **kw)
         r.raise_for_status()
         return r.json()
     except Exception:
         return None
 
 
-st.markdown('<p class="avia-title">AVIAMETRICS</p>', unsafe_allow_html=True)
-st.markdown(f'<p class="avia-tag">{t(lang, "tagline")}</p>', unsafe_allow_html=True)
-tabs = st.tabs([t(lang, k) for k in ["tab_live", "tab_time", "tab_numbers", "tab_guess", "tab_plugin", "tab_data", "tab_arch"]])
-
-
 def alt_color(a):
-    x = 0 if a is None or pd.isna(a) else max(0.0, min(1.0, float(a) / 40000))
+    x = max(0.0, min(1.0, float(a or 0) / 40000))
     return [int(80 + 175 * x), int(170 + 30 * x - 60 * x * x), int(255 - 210 * x), 235]
 
 
@@ -76,18 +63,125 @@ def outline():
                       get_line_color=[217, 179, 108, 120], line_width_min_pixels=1)] if g else []
 
 
-# ------------------------------------------------------------------ 1 live radar
+def deck(layers, view, tooltip=None, height=620):
+    st.pydeck_chart(pdk.Deck(layers=outline() + layers, map_provider="carto", map_style="dark",
+                             initial_view_state=view, tooltip=tooltip), height=height)
+
+
+AT_VIEW = pdk.ViewState(latitude=47.6, longitude=13.4, zoom=6.3)
+
+# ------------------------------------------------------------------ sidebar: language, role, central day selection
+lang = st.sidebar.radio("🌐", list(LANGS), format_func=LANGS.get, horizontal=True,
+                        index=list(LANGS).index(CFG["app"]["default_language"]))
+role = st.sidebar.radio(t(lang, "role"), ["visitor", "analyst"], format_func=lambda r: t(lang, f"role_{r}"),
+                        help=t(lang, "role_help"), key="role")
+days = api("/v1/days") or []
+
+
+@st.dialog(" ")
+def add_day_dialog():
+    st.subheader(t(lang, "add_day"))
+    d1, d2, d3 = st.tabs([t(lang, "add_download"), t(lang, "add_folder"), t(lang, "add_auto")])
+    with d1:
+        nd = st.date_input(t(lang, "day"), value=None, max_value=date.today(), format="DD.MM.YYYY")
+        st.caption(t(lang, "download_hint"))
+        if nd and st.button(t(lang, "start_download"), type="primary"):
+            api(f"/v1/days/{nd}", method="POST"); st.session_state["toast"] = t(lang, "load_started"); st.rerun()
+    with d2:
+        cur = st.session_state.setdefault("browse", "~")
+        b = api("/v1/browse", params={"path": cur}) or {"path": "~", "folders": [], "parent": None}
+        c = st.columns([1, 5])
+        if b.get("parent") is not None and c[0].button("⬆", key="up"):
+            st.session_state["browse"] = b["parent"] or "~"; st.rerun(scope="fragment")
+        c[1].markdown(f"📁 `{b['path']}`" + ("  ✅ adsb.lol" if b.get("is_adsblol_day") else ""))
+        sel = st.selectbox(t(lang, "subfolder"), [""] + b["folders"], key=f"sub_{cur}")
+        if sel:
+            st.session_state["browse"] = b["path"].rstrip("/") + "/" + sel; st.rerun(scope="fragment")
+        if st.button(t(lang, "scan_this"), type="primary"):
+            st.session_state["found"] = api("/v1/scan_path", params={"path": b["path"]}) or []
+    with d3:
+        st.caption(t(lang, "auto_hint"))
+        if st.button(t(lang, "auto_btn"), type="primary"):
+            with st.spinner("…"):
+                st.session_state["found"] = api("/v1/scan", params={"auto": True}) or []
+    found = st.session_state.get("found")
+    if found is not None:
+        st.markdown("---")
+        if not found:
+            st.info(t(lang, "found_none"))
+        for i, r in enumerate(found):
+            c = st.columns([4, 2, 2])
+            c[0].markdown(f"`{r['folder']}`")
+            if r.get("error"):
+                c[1].error(r["error"]); continue
+            c[1].markdown(f"**{r.get('day') or '?'}**")
+            if r.get("loaded"):
+                c[2].caption(t(lang, "already"))
+            elif r.get("day") and c[2].button(t(lang, "import_btn"), key=f"imp{i}"):
+                api(f"/v1/days/{r['day']}", method="POST", params={"source": r["folder"]})
+                st.session_state["toast"] = t(lang, "load_started"); st.rerun()
+
+
+st.sidebar.markdown("---")
+day = st.sidebar.selectbox(t(lang, "day"), days, index=len(days) - 1 if days else None,
+                           placeholder=t(lang, "no_days_short")) if days else None
+if not days:
+    st.sidebar.caption(t(lang, "no_days_short"))
+if st.sidebar.button("＋ " + t(lang, "add_day"), use_container_width=True):
+    add_day_dialog()
+if "toast" in st.session_state:
+    st.toast(st.session_state.pop("toast"), icon="⏳")
+st.sidebar.markdown("---")
+st.sidebar.caption("Flugdatenanalyse für das BMLV · TGM 2026/27\n\nStefan Aschauer · Isaac Jerryson")
+st.sidebar.caption(t(lang, "credits"))
+
+st.markdown('<p class="avia-title">AVIAMETRICS</p>', unsafe_allow_html=True)
+st.markdown(f'<p class="avia-tag">{t(lang, "tagline")}</p>', unsafe_allow_html=True)
+tabs = st.tabs([t(lang, k) for k in ["tab_live", "tab_time", "tab_numbers", "tab_guess", "tab_plugin", "tab_data", "tab_arch"]])
+
+
+def need_day():
+    st.info(t(lang, "no_days"))
+    if st.button("＋ " + t(lang, "add_day"), key=f"nd{time.time_ns()}"):
+        add_day_dialog()
+
+
+# ------------------------------------------------------------------ 1 live radar with Notion-style filters
+FILTERS = ["f_alt", "f_speed", "f_type", "f_at", "f_ground"]
 with tabs[0]:
-    fc = st.columns([1, 1, 2, 3])
-    view3d = fc[0].toggle(t(lang, "view3d"), value=False)
-    only_at = fc[1].toggle(t(lang, "only_at"), value=False)
-    alt_rng = fc[2].slider(t(lang, "alt_filter"), 0, 50000, (0, 50000), step=1000, format="%d ft")
-    type_sel = fc[3].multiselect(t(lang, "type_filter"), st.session_state.get("live_types", []), placeholder=t(lang, "all_types"))
-    st.markdown(f"""<div style="display:flex;gap:18px;align-items:center;flex-wrap:wrap;font-size:.85rem;color:#a9a294;margin:-4px 0 6px">
-      <span><b style="color:#e9e4d8">{t(lang, "legend")}</b></span>
-      <span>● {t(lang, "leg_dot")}</span><span style="color:#d9b36c">━ {t(lang, "leg_trail")}</span>
+    active = st.session_state.setdefault("filters", [])
+    bar = st.columns([1, 1, 6])
+    view3d = bar[0].toggle(t(lang, "view3d"), value=False)
+    with bar[1].popover("＋ Filter"):
+        avail = [f for f in FILTERS if f not in active]
+        if avail:
+            pick = st.selectbox(t(lang, "add_filter"), avail, format_func=lambda f: t(lang, f), index=None, placeholder="…")
+            if pick:
+                active.append(pick); st.rerun()
+        else:
+            st.caption("✓")
+    fvals = {}
+    if active:
+        cols = st.columns(len(active))
+        for c, f in zip(cols, list(active)):
+            with c.container(border=True):
+                h = st.columns([5, 1])
+                h[0].markdown(f"**{t(lang, f)}**")
+                if h[1].button("✕", key=f"rm_{f}"):
+                    active.remove(f); st.rerun()
+                if f == "f_alt":
+                    fvals[f] = st.slider(" ", 0, 50000, (0, 50000), 1000, format="%d ft", key="v_alt", label_visibility="collapsed")
+                elif f == "f_speed":
+                    fvals[f] = st.slider(" ", 0, 700, (0, 700), 10, format="%d kt", key="v_speed", label_visibility="collapsed")
+                elif f == "f_type":
+                    fvals[f] = st.multiselect(" ", st.session_state.get("live_types", []), key="v_type", label_visibility="collapsed")
+                else:
+                    fvals[f] = True
+                    st.caption(t(lang, f + "_hint"))
+    st.markdown(f"""<div class="legend"><b style="color:#e9e4d8">{t(lang, "legend")}</b>
+      <span>● {t(lang, "leg_dot")}</span><span style="color:{GOLD}">━ {t(lang, "leg_trail")}</span>
       <span>{t(lang, "leg_alt")}: 0 ft <span style="display:inline-block;width:140px;height:9px;border-radius:5px;vertical-align:middle;
-        background:linear-gradient(90deg,rgb(80,170,255),rgb(168,186,150),rgb(255,140,45))"></span> 40.000 ft</span>
+      background:linear-gradient(90deg,rgb(80,170,255),rgb(168,186,150),rgb(255,140,45))"></span> 40.000 ft</span>
       <span>▭ {t(lang, "leg_border")}</span></div>""", unsafe_allow_html=True)
 
     @st.fragment(run_every=10)
@@ -98,109 +192,111 @@ with tabs[0]:
         df = pd.DataFrame(d["aircraft"])
         if df.empty:
             st.warning("–"); return
-        hist = st.session_state.setdefault("trails", {})
-        now = time.time()
-        for r in df.itertuples():
-            hist.setdefault(r.icao, []).append((now, r.lon, r.lat, float(r.alt or 0) * 0.3048))
-        for k in list(hist):
-            hist[k] = [p for p in hist[k] if now - p[0] < 240][-25:]
-            if not hist[k]:
-                del hist[k]
         for col in ["flight", "type", "reg", "icao"]:
             df[col] = df[col].fillna("").astype(str)
         df["alt"] = pd.to_numeric(df.alt, errors="coerce").fillna(0).astype(int)
         df["gs"] = pd.to_numeric(df.gs, errors="coerce").fillna(0).round().astype(int)
-        df["color"] = df.alt.map(alt_color)
-        df["alt_m"] = df.alt.astype(float) * 0.3048 * (3 if view3d else 0)
-        df = df[["icao", "flight", "type", "reg", "lat", "lon", "alt", "gs", "alt_m", "color"]]
+        df["in_at"] = df["in_at"].astype(bool) if "in_at" in df else False
         st.session_state["live_types"] = sorted(x for x in df.type.unique() if x)
-        df = df[df.alt.between(*alt_rng)]
-        if type_sel:
-            df = df[df.type.isin(type_sel)]
-        at = df[df.lat.between(LAT0, LAT1) & df.lon.between(LON0, LON1)]
-        if only_at:
+        hist = st.session_state.setdefault("trails", {})
+        now = time.time()
+        for r in df.itertuples():
+            hist.setdefault(r.icao, []).append((now, r.lon, r.lat, r.alt * 0.3048))
+        for k in list(hist):
+            hist[k] = [p for p in hist[k] if now - p[0] < 240][-25:]
+            if not hist[k]:
+                del hist[k]
+        # filters
+        if "f_alt" in fvals:
+            df = df[df.alt.between(*fvals["f_alt"])]
+        if "f_speed" in fvals:
+            df = df[df.gs.between(*fvals["f_speed"])]
+        if fvals.get("f_type"):
+            df = df[df.type.isin(fvals["f_type"])]
+        if "f_ground" in fvals:
+            df = df[df.alt > 0]
+        at = df[df.in_at]
+        if "f_at" in fvals:
             df = at
+        df = df.assign(color=df.alt.map(alt_color), alt_m=df.alt * 0.3048 * (3 if view3d else 0))
+        df = df[["icao", "flight", "type", "reg", "lat", "lon", "alt", "gs", "alt_m", "color"]]
         left, right = st.columns([3, 1])
         right.metric(t(lang, "over_at"), len(at))
-        right.metric(t(lang, "in_radius"), len(df))
+        right.metric(t(lang, "shown"), len(df))
         right.metric(t(lang, "highest"), f"{int(at.alt.max()):,} ft".replace(",", ".") if len(at) else "–")
         tp = at[(at.type != "") & (at.type != "MIL")].type.value_counts()
         right.metric(t(lang, "common"), tp.index[0] if len(tp) else "–")
-        if len(tp):
-            right.dataframe(tp.head(8).rename_axis(t(lang, "types")).reset_index(name="#"), hide_index=True, use_container_width=True)
-        trails = pd.DataFrame([{"path": [[p[1], p[2], p[3] * (3 if view3d else 0)] for p in v]} for v in hist.values() if len(v) > 1])
-        layers = outline()
+        shown = set(df.icao)
+        trails = pd.DataFrame([{"path": [[p[1], p[2], p[3] * (3 if view3d else 0)] for p in v]}
+                               for k, v in hist.items() if k in shown and len(v) > 1])
+        layers = []
         if len(trails):
             layers.append(pdk.Layer("PathLayer", trails, get_path="path", get_color=[217, 179, 108, 110], width_min_pixels=1.5))
         if view3d:
-            df["ground"] = df.apply(lambda r: [r.lon, r.lat, 0], axis=1)
-            df["air"] = df.apply(lambda r: [r.lon, r.lat, r.alt_m], axis=1)
+            df = df.assign(ground=[[x, y, 0] for x, y in zip(df.lon, df.lat)], air=[[x, y, z] for x, y, z in zip(df.lon, df.lat, df.alt_m)])
             layers.append(pdk.Layer("LineLayer", df, get_source_position="ground", get_target_position="air",
                                     get_color=[120, 160, 200, 60], get_width=1))
         layers.append(pdk.Layer("ScatterplotLayer", df, get_position=["lon", "lat", "alt_m"], get_fill_color="color",
                                 get_radius=2200, radius_min_pixels=3, radius_max_pixels=10, pickable=True))
         with left:
-            st.pydeck_chart(pdk.Deck(layers=layers, map_provider="carto", map_style="dark",
-                                     initial_view_state=pdk.ViewState(latitude=47.6, longitude=13.4, zoom=6.3,
-                                                                      pitch=50 if view3d else 0, bearing=-10 if view3d else 0),
-                                     tooltip={"text": "{flight} · {type}\n{alt} ft · {gs} kt"}), height=640)
+            deck(layers, pdk.ViewState(latitude=47.6, longitude=13.4, zoom=6.3, pitch=50 if view3d else 0, bearing=-10 if view3d else 0),
+                 {"text": "{flight} · {type}\n{alt} ft · {gs} kt"}, height=640)
+        # fetch statistics
+        stats = st.session_state.setdefault("fetch_stats", [])
+        if d.get("fetched_at") and (not stats or stats[-1]["t"] != d["fetched_at"]):
+            stats.append({"t": d["fetched_at"], "ms": d.get("latency_ms"), "kb": round((d.get("bytes") or 0) / 1000), "n": len(d["aircraft"])})
+            del stats[:-90]
         mode = t(lang, f"mode_{d['mode']}")
-        st.caption(f"{t(lang, 'source')}: {d['source']} · {mode} · {time.strftime('%H:%M:%S')}"
-                   + (f" · {t(lang, 'masked')}" if role == "visitor" else ""))
+        ms = f" · {t(lang, 'latency')} {d['latency_ms']} ms" if d.get("latency_ms") is not None else ""
+        st.caption(f"{t(lang, 'source')}: {d['source']} · {mode}{ms} · {len(d['aircraft'])} {t(lang, 'aircraft')} · "
+                   f"{time.strftime('%H:%M:%S')}" + (f" · {t(lang, 'masked')}" if role == "visitor" else ""))
+        if len(stats) > 1:
+            with st.expander(t(lang, "fetch_stats")):
+                sdf = pd.DataFrame(stats).assign(time=lambda x: pd.to_datetime(x.t, unit="s"))
+                st.altair_chart(alt.Chart(sdf).mark_line(color=GOLD, point=True).encode(
+                    x=alt.X("time:T", title=None), y=alt.Y("ms:Q", title=t(lang, "latency") + " (ms)"),
+                    tooltip=["time:T", "ms:Q", "kb:Q", "n:Q"]), use_container_width=True)
+                st.caption(t(lang, "fetch_stats_hint"))
     live()
 
 # ------------------------------------------------------------------ 2 time travel
-days = api("/v1/days") or []
 with tabs[1]:
-    st.caption(t(lang, "play_hint"))
-    if not days:
-        st.info(t(lang, "no_days"))
+    if not day:
+        need_day()
     else:
-        day = st.selectbox(t(lang, "day"), days, index=len(days) - 1, key="tt_day")
-
-        @st.cache_data(show_spinner=True)
-        def trips(day, role):
-            return api(f"/v1/trips/{day}?step_s=60")
-        view = st.radio(t(lang, "tt_view"), ["anim", "heat", "hex"], horizontal=True,
-                        format_func=lambda v: t(lang, f"tt_{v}"), key="tt_view")
-        data = trips(day, role) if view == "anim" else None
-        if view != "anim":
+        view = st.radio(t(lang, "tt_view"), ["anim", "heat", "hex"], horizontal=True, format_func=lambda v: t(lang, f"tt_{v}"))
+        if view == "anim":
+            @st.cache_data(show_spinner=True)
+            def trips(day, role):
+                return api(f"/v1/trips/{day}?step_s=60")
+            data = trips(day, role)
+            st.caption(t(lang, "play_hint"))
+            if data:
+                html = (Path(__file__).parent / "timetravel.html").read_text()
+                components.html(html.replace("__TRIPS__", json.dumps(data["trips"], separators=(",", ":")))
+                                .replace("__GEO__", json.dumps(bundeslaender() or {"type": "FeatureCollection", "features": []}))
+                                .replace("__MASK__", "true" if role == "visitor" else "false"), height=640)
+        else:
             @st.cache_data(show_spinner=True)
             def heatdata(day):
                 return api(f"/v1/heat/{day}")
             pts = pd.DataFrame(heatdata(day) or [], columns=["lon", "lat", "alt"])
             if view == "heat":
-                layer = pdk.Layer("HeatmapLayer", pts, get_position=["lon", "lat"], radius_pixels=22, intensity=1.2,
-                                  threshold=0.03, color_range=[[20, 30, 60], [60, 90, 150], [120, 150, 200], [217, 179, 108], [255, 140, 45], [255, 230, 180]])
-                vs = pdk.ViewState(latitude=47.6, longitude=13.4, zoom=6.4)
+                layer = pdk.Layer("HeatmapLayer", pts, get_position=["lon", "lat"], radius_pixels=22, intensity=1.2, threshold=0.03,
+                                  color_range=[[20, 30, 60], [60, 90, 150], [120, 150, 200], [217, 179, 108], [255, 140, 45], [255, 230, 180]])
+                deck([layer], AT_VIEW)
             else:
-                layer = pdk.Layer("HexagonLayer", pts, get_position=["lon", "lat"], radius=4000, elevation_scale=60,
-                                  extruded=True, coverage=0.9, pickable=True,
+                layer = pdk.Layer("HexagonLayer", pts, get_position=["lon", "lat"], radius=4000, elevation_scale=60, extruded=True,
+                                  coverage=0.9, pickable=True,
                                   color_range=[[40, 60, 100], [70, 110, 160], [140, 160, 170], [217, 179, 108], [240, 150, 60], [255, 100, 40]])
-                vs = pdk.ViewState(latitude=47.3, longitude=13.4, zoom=6.5, pitch=50, bearing=-15)
-            st.pydeck_chart(pdk.Deck(layers=outline() + [layer], map_provider="carto", map_style="dark", initial_view_state=vs,
-                                     tooltip={"text": "{elevationValue}"} if view == "hex" else None), height=620)
+                deck([layer], pdk.ViewState(latitude=47.3, longitude=13.4, zoom=6.5, pitch=50, bearing=-15), {"text": "{elevationValue}"})
             st.caption(t(lang, f"tt_{view}_cap"))
-        if data:
-            html = (Path(__file__).parent / "timetravel.html").read_text()
-            components.html(html.replace("__TRIPS__", json.dumps(data["trips"], separators=(",", ":")))
-                            .replace("__GEO__", json.dumps(bundeslaender() or {"type": "FeatureCollection", "features": []}))
-                            .replace("__MASK__", "true" if role == "visitor" else "false"), height=640)
-    with st.expander(t(lang, "load_day")):
-        new = st.date_input(t(lang, "day"), value=None, format="DD.MM.YYYY", key="newday")
-        if new and st.button(t(lang, "load_btn")):
-            api(f"/v1/days/{new}", method="POST")
-            st.success(t(lang, "load_started"))
-        if new:
-            s = api(f"/v1/days/{new}/status")
-            if s:
-                st.caption(f"{s['status']} · {s['log']}")
 
 # ------------------------------------------------------------------ 3 numbers
 with tabs[2]:
-    if days:
-        day = st.selectbox(t(lang, "day"), days, index=len(days) - 1, key="num_day")
-
+    if not day:
+        need_day()
+    else:
         @st.cache_data
         def stats(day):
             return api(f"/v1/stats/{day}")
@@ -212,15 +308,16 @@ with tabs[2]:
                 col.metric(t(lang, key), f"{k[key]:,}".replace(",", ".") if k[key] is not None else "–")
             a, b = st.columns(2)
             a.subheader(t(lang, "per_hour"))
-            a.altair_chart(alt.Chart(pd.DataFrame(s["hourly"])).mark_area(color="#d9b36c", opacity=.75, line=True)
+            a.altair_chart(alt.Chart(pd.DataFrame(s["hourly"])).mark_area(color=GOLD, opacity=.75, line=True)
                            .encode(x=alt.X("hour:Q", title=None), y=alt.Y("aircraft:Q", title=None)), use_container_width=True)
             b.subheader(t(lang, "types"))
-            b.altair_chart(alt.Chart(pd.DataFrame(s["types"])).mark_bar(color="#7fa7c9")
+            b.altair_chart(alt.Chart(pd.DataFrame(s["types"])).mark_bar(color=BLUE)
                            .encode(x=alt.X("aircraft:Q", title=None), y=alt.Y("type:N", sort="-x", title=None)), use_container_width=True)
             if s["regions"]:
                 st.subheader(t(lang, "per_region"))
                 reg = pd.DataFrame(s["regions"])
                 g = bundeslaender()
+                m1, m2 = st.columns([3, 2])
                 if g:
                     mx = max(reg.km.max(), 1)
                     kmap = dict(zip(reg.region, reg.km))
@@ -228,33 +325,32 @@ with tabs[2]:
                         v = kmap.get(f["properties"].get("name"), 0)
                         f["properties"]["km"] = int(v)
                         f["properties"]["fill"] = [217, 179, 108, int(40 + 200 * v / mx)]
-                    st.pydeck_chart(pdk.Deck(layers=[pdk.Layer("GeoJsonLayer", g, filled=True, stroked=True, pickable=True,
-                                                               get_fill_color="properties.fill", get_line_color=[30, 30, 30, 200])],
-                                             map_provider="carto", map_style="dark", tooltip={"text": "{name}: {km} km"},
-                                             initial_view_state=pdk.ViewState(latitude=47.6, longitude=13.4, zoom=6.2)), height=420)
-                st.altair_chart(alt.Chart(reg).mark_bar(color="#d9b36c").encode(x=alt.X("km:Q", title="km"), y=alt.Y("region:N", sort="-x", title=None)),
+                    with m1:
+                        st.pydeck_chart(pdk.Deck(layers=[pdk.Layer("GeoJsonLayer", g, filled=True, stroked=True, pickable=True,
+                                                                   get_fill_color="properties.fill", get_line_color=[30, 30, 30, 200])],
+                                                 map_provider="carto", map_style="dark", tooltip={"text": "{name}: {km} km"},
+                                                 initial_view_state=pdk.ViewState(latitude=47.6, longitude=13.4, zoom=6.0)), height=420)
+                m2.altair_chart(alt.Chart(reg).mark_bar(color=GOLD).encode(x=alt.X("km:Q", title="km"), y=alt.Y("region:N", sort="-x", title=None)),
                                 use_container_width=True)
             f = s["facts"]
             st.subheader(t(lang, "facts"))
             if "longest_flight" in f:
                 st.markdown(f'<div class="fact">✈️ {t(lang, "fact_longest", **f["longest_flight"])}</div>', unsafe_allow_html=True)
             if "busiest_minute" in f:
-                m = (f["busiest_minute"]["utc_minute_of_day"] + 60) % 1440
-                st.markdown(f'<div class="fact">⏱️ {t(lang, "fact_busiest", aircraft=f["busiest_minute"]["aircraft"], time=f"{m // 60:02d}:{m % 60:02d}")}</div>', unsafe_allow_html=True)
+                mm = (f["busiest_minute"]["utc_minute_of_day"] + 60) % 1440
+                st.markdown(f'<div class="fact">⏱️ {t(lang, "fact_busiest", aircraft=f["busiest_minute"]["aircraft"], time=f"{mm // 60:02d}:{mm % 60:02d}")}</div>', unsafe_allow_html=True)
             if "highest" in f:
-                st.markdown(f'<div class="fact">🏔️ {t(lang, "fact_highest", type=f["highest"]["type"], alt=f"{f["highest"]["alt_ft"]:,}".replace(",", "."))}</div>', unsafe_allow_html=True)
-    else:
-        st.info(t(lang, "no_days"))
+                hv = f"{f['highest']['alt_ft']:,}".replace(",", ".")
+                st.markdown(f'<div class="fact">🏔️ {t(lang, "fact_highest", type=f["highest"]["type"], alt=hv)}</div>', unsafe_allow_html=True)
 
 # ------------------------------------------------------------------ 4 guess
 with tabs[3]:
     st.subheader(t(lang, "guess_q"))
-    g = st.number_input("", min_value=0, max_value=2000, value=50, step=5, label_visibility="collapsed")
-    if st.button(t(lang, "guess_btn")):
+    g = st.number_input("guess", min_value=0, max_value=2000, value=50, step=5, label_visibility="collapsed")
+    if st.button(t(lang, "guess_btn"), type="primary"):
         d = api("/v1/live")
         if d:
-            df = pd.DataFrame(d["aircraft"])
-            real = int((df.lat.between(LAT0, LAT1) & df.lon.between(LON0, LON1)).sum()) if len(df) else 0
+            real = sum(1 for a in d["aircraft"] if a.get("in_at"))
             if real == g:
                 st.balloons(); st.success(t(lang, "guess_exact"))
             else:
@@ -267,73 +363,30 @@ with tabs[4]:
     st.write(t(lang, "plugin_intro"))
     st.markdown(f"[{t(lang, 'plugin_docs')} →]({PUBLIC_API}/docs)")
     plugin = Path(__file__).resolve().parents[1] / "plugins" / "co2_demo.py"
-    if days:
-        pday = st.selectbox(t(lang, "day"), days, index=len(days) - 1, key="pl_day")
-        if st.button(t(lang, "plugin_run")):
-            sys.path.insert(0, str(plugin.parent))
-            import co2_demo  # noqa: E402
-            t0 = time.perf_counter()
-            res = co2_demo.run(API_URL, pday, role)
-            st.success(f"{time.perf_counter() - t0:.1f} s")
-            st.altair_chart(alt.Chart(res.head(15)).mark_bar(color="#7fa7c9").encode(
-                x=alt.X("t_co2:Q", title="t CO₂ (Demo)"), y=alt.Y("type:N", sort="-x", title=None)), use_container_width=True)
-            st.dataframe(res, use_container_width=True, hide_index=True)
+    if not day:
+        need_day()
+    elif st.button(t(lang, "plugin_run"), type="primary"):
+        sys.path.insert(0, str(plugin.parent))
+        import co2_demo  # noqa: E402
+        t0 = time.perf_counter()
+        res = co2_demo.run(API_URL, day, role)
+        st.success(f"{time.perf_counter() - t0:.1f} s")
+        st.altair_chart(alt.Chart(res.head(15)).mark_bar(color=BLUE).encode(
+            x=alt.X("t_co2:Q", title="t CO₂ (Demo)"), y=alt.Y("type:N", sort="-x", title=None)), use_container_width=True)
+        st.dataframe(res, use_container_width=True, hide_index=True)
     with st.expander(t(lang, "plugin_code")):
         st.code(plugin.read_text(), language="python")
 
-# ------------------------------------------------------------------ 6 data manager
+# ------------------------------------------------------------------ 6 data: storage + live processing
 with tabs[5]:
-    cfg = api("/v1/settings") or {"folders": [], "data_dir": "?"}
-    st.markdown(f"**{t(lang, 'data_location')}:** `{cfg['data_dir']}`")
-    st.caption(t(lang, "data_location_help"))
+    cfg = api("/v1/settings") or {"data_dir": "?"}
+    a, b = st.columns([3, 1])
+    a.markdown(f"**{t(lang, 'data_location')}:** `{cfg['data_dir']}`")
+    a.caption(t(lang, "data_location_help"))
+    if b.button("＋ " + t(lang, "add_day"), use_container_width=True, type="primary", key="add_data_tab"):
+        add_day_dialog()
     st.markdown(f"**{t(lang, 'loaded_days')}:** " + (", ".join(days) if days else "–"))
-    home = cfg.get("host_home") or ""
-    short = lambda f: f.replace(home, "~", 1) if home and f.startswith(home) else f
-    folders = [short(f) for f in cfg["folders"]]
-    st.markdown(f"**{t(lang, 'folders')}**")
-    for i, f in enumerate(folders):
-        c = st.columns([6, 1])
-        c[0].code(f, language=None)
-        if c[1].button("✕", key=f"rm{i}"):
-            folders.pop(i)
-            api("/v1/settings", method="PUT", json={"folders": [home + x[1:] if x.startswith("~") else x for x in folders]})
-            st.rerun()
-    cur = st.session_state.setdefault("browse", "~")
-    b = api("/v1/browse", params={"path": cur}) or {"path": "~", "folders": [], "parent": None}
-    with st.container(border=True):
-        nav = st.columns([1, 6, 2])
-        if b.get("parent") is not None and nav[0].button("⬆", key="up"):
-            st.session_state["browse"] = b["parent"] or "~"; st.rerun()
-        nav[1].markdown(f"📁 `{b['path']}`" + (" · adsb.lol ✓" if b.get("is_adsblol_day") else ""))
-        if nav[2].button(t(lang, "choose_folder"), key="choose"):
-            if b["path"] not in folders:
-                folders.append(b["path"])
-            api("/v1/settings", method="PUT", json={"folders": [home + x[1:] if x.startswith("~") else x for x in folders]})
-            st.session_state["scan"] = api("/v1/scan") or []
-            st.rerun()
-        grid = st.columns(4)
-        for i, name in enumerate(b["folders"][:40]):
-            if grid[i % 4].button(f"📁 {name}", key=f"sub{i}", use_container_width=True):
-                st.session_state["browse"] = (b["path"].rstrip("/") + "/" + name); st.rerun()
-    if st.button(t(lang, "scan")):
-        st.session_state["scan"] = api("/v1/scan") or []
-    res = st.session_state.get("scan")
-    if res is not None:
-        if not res:
-            st.info(t(lang, "found_none"))
-        for i, r in enumerate(res):
-            c = st.columns([4, 2, 2])
-            c[0].markdown(f"`{r['folder']}`")
-            if r.get("error"):
-                c[1].error(r["error"]); continue
-            c[1].markdown(f"**{r.get('day') or '?'}**")
-            if r.get("loaded"):
-                c[2].caption(t(lang, "already"))
-            elif r.get("day") and c[2].button(t(lang, "import_btn"), key=f"imp{i}"):
-                api(f"/v1/days/{r['day']}", method="POST", params={"source": r["folder"]})
-                st.success(t(lang, "load_started"))
-    st.markdown("---")
-    st.markdown(f"**{t(lang, 'jobs')}**")
+    st.markdown(f"#### {t(lang, 'jobs')}")
 
     @st.fragment(run_every=2)
     def jobs_view():
@@ -357,26 +410,46 @@ with tabs[5]:
                         mark = "·"
                     c.markdown(f"<div style='text-align:center;font-size:.85rem'>{mark}<br>{t(lang, 'stage_' + sname)}</div>", unsafe_allow_html=True)
                 if status == "running":
-                    pct = job.get("pct")
-                    st.progress(min(1.0, (pct or 0) / 100), text=job.get("msg") or "")
+                    st.progress(min(1.0, (job.get("pct") or 0) / 100), text=job.get("msg") or "")
                 elif status == "failed":
                     st.error(job.get("msg") or "")
-                elif status == "done":
+                else:
                     st.success(t(lang, "job_done"))
     jobs_view()
 
-    st.markdown("---")
-    st.markdown(f"**{t(lang, 'load_day')}**")
-    nd = st.date_input(t(lang, "day"), value=None, format="DD.MM.YYYY", key="dl_day")
-    if nd and st.button(t(lang, "load_btn"), key="dl_btn"):
-        api(f"/v1/days/{nd}", method="POST")
-        st.success(t(lang, "load_started"))
-
 # ------------------------------------------------------------------ 7 architecture
 with tabs[6]:
-    st.code("""
- adsb.lol archive ──HTTPS──► [pipeline] Dagster ──► DuckLake (SQLite catalog + Parquet, per day) ◄──DuckDB── [api] FastAPI ◄──HTTP── [app] Streamlit ◄── you
- adsb.lol / adsb.fi / airplanes.live (live, fallback chain) ──────────────────────► /v1/live    ▲
-                                                                       CO₂ plugin (external) ──┘  JSON / Arrow
-""", language=None)
+    st.subheader(t(lang, "arch_title"))
+    st.graphviz_chart("""
+digraph G {
+  rankdir=LR; bgcolor="transparent"; fontname="Helvetica"; nodesep=0.35; ranksep=0.6;
+  node [shape=box, style="rounded,filled", fillcolor="#15181d", color="#6b5a33", fontcolor="#e9e4d8", fontname="Helvetica", fontsize=11];
+  edge [color="#d9b36c", fontcolor="#a9a294", fontsize=9, fontname="Helvetica"];
+  subgraph cluster_src { label="Sources"; color="#3a3222"; fontcolor="#d9b36c";
+    arch [label="adsb.lol archive\\n(daily, ODbL)"]; live [label="Live APIs\\nadsb.lol → adsb.fi → airplanes.live"]; geo [label="Borders\\nStatistik Austria (CC BY)"]; }
+  subgraph cluster_pipe { label="pipeline container · Dagster"; color="#3a3222"; fontcolor="#d9b36c";
+    dl [label="Download / import\\nhttpx · tar"]; parse [label="Parse + clean\\norjson · PyArrow"]; enr [label="Bundesland\\nDuckDB spatial"]; seg [label="Flight segments\\nDuckDB SQL"]; }
+  subgraph cluster_store { label="storage (../aviametrics-data)"; color="#3a3222"; fontcolor="#d9b36c";
+    lake [label="DuckLake\\nSQLite catalog + Parquet per day", shape=cylinder]; }
+  subgraph cluster_api { label="api container · FastAPI"; color="#3a3222"; fontcolor="#d9b36c";
+    repo [label="Repository\\nDuckDB (only SQL here)"]; ep [label="/v1/… endpoints\\nJSON + Arrow · OpenAPI"]; mask [label="Roles → masking\\n(Isaac)"]; }
+  subgraph cluster_app { label="app container · Streamlit"; color="#3a3222"; fontcolor="#d9b36c";
+    ui [label="Web app\\npydeck · deck.gl · Altair · DE/EN"]; }
+  plug [label="Plugins (Python / R)\\nWirtschaftsingenieure", fillcolor="#1d1a14"];
+  user [label="Browser", shape=ellipse];
+  arch -> dl [label="HTTPS"]; dl -> parse -> enr -> seg; geo -> enr; enr -> lake [label="atomic write"]; seg -> lake;
+  lake -> repo [label="read"]; repo -> mask -> ep; live -> ep [label="fallback chain"];
+  ep -> ui [label="HTTP"]; ep -> plug [label="Arrow"]; ui -> user;
+}""", use_container_width=True)
+    st.subheader(t(lang, "arch_stack"))
+    st.dataframe(pd.DataFrame([
+        ["Pipeline", "Dagster", "daily partitioned assets, data checks, UI"],
+        ["Download", "httpx", "archive download, live polling"],
+        ["Parsing", "orjson · PyArrow", "read JSON traces, columnar tables"],
+        ["Storage", "DuckLake (SQLite catalog) · Parquet", "tables with snapshots, atomic writes, one partition per day"],
+        ["Query + geo", "DuckDB + spatial", "SQL analytics, point-in-polygon"],
+        ["API", "FastAPI · Uvicorn · Pydantic", "plugin interface, OpenAPI docs, JSON + Arrow"],
+        ["App", "Streamlit · pydeck · deck.gl · Altair", "UI, maps, charts"],
+        ["Operations", "Docker Compose · start.sh · uv", "one-command start, reproducible environment"],
+    ], columns=["Layer", "Technology", "Role"]), hide_index=True, use_container_width=True)
     st.caption(t(lang, "arch_note"))

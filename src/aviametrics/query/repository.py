@@ -104,3 +104,32 @@ def mask(value):
 def heat(day: str, n: int = 250000) -> list:
     rows = con().sql(f"SELECT lon, lat, alt FROM (SELECT lon, lat, coalesce(alt, 0) AS alt FROM {_p(day)} WHERE {IN_AT}) USING SAMPLE {int(n)} ROWS").fetchall()
     return [[round(a, 4), round(b, 4), c] for a, b, c in rows]
+
+
+# ------------------------------------------------------------------ live helpers
+def _austria_polygon(c) -> bool:
+    if getattr(_local, "poly", None) is None:
+        from aviametrics.config import geo_dir
+        cand = [p for p in geo_dir().glob("2021/**/*.json") if "laender" in p.name.lower() and "topo" not in str(p).lower()]
+        if not cand:
+            _local.poly = False
+            return False
+        c.sql("INSTALL spatial; LOAD spatial")
+        f = min(cand, key=lambda p: p.stat().st_size)
+        c.sql(f"CREATE OR REPLACE TEMP TABLE at_poly AS SELECT ST_Union_Agg(geom) AS g FROM ST_Read('{f}')")
+        _local.poly = True
+    return _local.poly
+
+
+def in_austria(lons: list, lats: list) -> set[int]:
+    """Indices of points that lie inside Austria's border (polygon test); falls back to the bounding box."""
+    import pyarrow as pa
+    c = con()
+    if not lons:
+        return set()
+    if not _austria_polygon(c):
+        return {i for i, (x, y) in enumerate(zip(lons, lats)) if LAT0 <= y <= LAT1 and LON0 <= x <= LON1}
+    c.register("pts", pa.table({"i": list(range(len(lons))), "lon": [float(x) for x in lons], "lat": [float(y) for y in lats]}))
+    rows = c.execute("SELECT i FROM pts, at_poly WHERE ST_Contains(g, ST_Point(lon, lat))").fetchall()
+    c.unregister("pts")
+    return {r[0] for r in rows}
