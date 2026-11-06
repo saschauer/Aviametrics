@@ -1,0 +1,39 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<script src="https://unpkg.com/deck.gl@9.0.0/dist.min.js"></script>
+<script src="https://unpkg.com/maplibre-gl@4.0.0/dist/maplibre-gl.js"></script>
+<link href="https://unpkg.com/maplibre-gl@4.0.0/dist/maplibre-gl.css" rel="stylesheet">
+<style>
+html,body{margin:0;height:100%;background:#0e1013;font-family:Georgia,serif;color:#e7c27d;overflow:hidden}
+#map{position:absolute;inset:0}
+#hud{position:absolute;left:14px;top:12px;background:rgba(14,16,19,.75);padding:8px 14px;border:1px solid #6b5a33;border-radius:6px}
+#clock{font-size:34px;letter-spacing:.08em}#count{font-size:13px;color:#cfc7b6}
+#ctl{position:absolute;left:14px;right:14px;bottom:12px;display:flex;gap:10px;align-items:center}
+button{background:#d9b36c;border:0;border-radius:5px;padding:6px 14px;font:600 14px Georgia;cursor:pointer}
+input[type=range]{flex:1;accent-color:#d9b36c}
+</style></head>
+<body><div id="map"></div>
+<div id="hud"><div id="clock">00:00</div><div id="count"></div></div>
+<div id="ctl"><button id="play">⏸</button><input id="t" type="range" min="0" max="86400" step="60" value="21600">
+<select id="speed"><option value="600">10 min/s</option><option value="1440" selected>24 min/s</option><option value="3600">1 h/s</option></select></div>
+<script>
+const TRIPS=__TRIPS__, GEO=__GEO__, MASK=__MASK__;
+const color=a=>{const x=Math.max(0,Math.min(1,a/40000));return[80+175*x,170+30*x-60*x*x,255-210*x]};
+TRIPS.forEach(d=>{d.c=d.mil&&MASK?[200,80,80]:color(Math.max(...d.alt))});
+let t=21600,playing=true,last=performance.now();
+const tEl=document.getElementById('t'),clock=document.getElementById('clock'),count=document.getElementById('count');
+const deckgl=new deck.DeckGL({container:'map',mapStyle:'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
+ initialViewState:{latitude:47.6,longitude:13.4,zoom:6.4,pitch:35,bearing:-8},controller:true});
+function layers(){return[
+ new deck.GeoJsonLayer({id:'bl',data:GEO,stroked:true,filled:false,getLineColor:[217,179,108,110],lineWidthMinPixels:1}),
+ new deck.TripsLayer({id:'trips',data:TRIPS,getPath:d=>d.path,getTimestamps:d=>d.t,getColor:d=>d.c,
+   widthMinPixels:2.2,trailLength:1500,currentTime:t,fadeTrail:true,capRounded:true,jointRounded:true})]}
+function frame(now){const dt=(now-last)/1000;last=now;
+ if(playing){t=(t+dt*+document.getElementById('speed').value)%86400;tEl.value=t}
+ const h=Math.floor(t/3600),m=Math.floor(t%3600/60);clock.textContent=String(h).padStart(2,'0')+':'+String(m).padStart(2,'0');
+ let n=0;for(const d of TRIPS){if(d.t[0]<=t&&d.t[d.t.length-1]>=t)n++}count.textContent=n+' ✈';
+ deckgl.setProps({layers:layers()});requestAnimationFrame(frame)}
+document.getElementById('play').onclick=e=>{playing=!playing;e.target.textContent=playing?'⏸':'▶'};
+tEl.oninput=e=>{t=+e.target.value};
+requestAnimationFrame(frame);
+</script></body></html>

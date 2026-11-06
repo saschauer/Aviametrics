@@ -1,0 +1,32 @@
+# Aviametrics showcase: 3 services sharing one data folder.  Start: ./start.sh
+x-common: &common
+  build: .
+  image: aviametrics:showcase
+  volumes:
+    - ./data:/data
+    - ${AVIA_IMPORT_DIR:-./import}:/import:ro
+  environment:
+    AVIA_DATA: /data
+    DAGSTER_HOME: /data/dagster_home
+    AVIA_IMPORT_DIR: /import
+    AVIA_IMPORT_DATE: ${AVIA_IMPORT_DATE:-}
+  restart: unless-stopped
+
+services:
+  pipeline:            # Dagster: UI + scheduler for the daily pipeline
+    <<: *common
+    command: dagster dev -m aviametrics.pipeline.definitions -h 0.0.0.0 -p 3000
+    ports: ["3000:3000"]
+  api:                 # FastAPI: plugin interface, docs at /docs
+    <<: *common
+    command: uvicorn aviametrics.api.main:app --host 0.0.0.0 --port 8000
+    ports: ["8000:8000"]
+  app:                 # Streamlit front end (talks only to the API)
+    <<: *common
+    command: streamlit run app/Aviametrics.py --server.address 0.0.0.0 --server.port 8501
+    ports: ["8501:8501"]
+    environment:
+      AVIA_DATA: /data
+      AVIA_API_URL: http://api:8000
+      AVIA_PUBLIC_API: http://localhost:8000
+    depends_on: [api]
