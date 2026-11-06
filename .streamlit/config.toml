@@ -10,3 +10,10 @@ headless = true
 
 [browser]
 gatherUsageStats = false
+
+[client]
+toolbarMode = "viewer"          # no Deploy button / developer menu
+showErrorDetails = false
+
+[ui]
+hideTopBar = true

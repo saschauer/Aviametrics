@@ -22,7 +22,11 @@ LAT0, LAT1, LON0, LON1 = CFG["area"]["bbox_core"]
 st.set_page_config(page_title="Aviametrics", page_icon="✈️", layout="wide")
 st.markdown("""<style>
 @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&display=swap');
-.block-container{padding-top:1rem}
+.block-container{padding-top:1.4rem;max-width:1600px}
+header[data-testid="stHeader"],#MainMenu,footer,[data-testid="stToolbar"],[data-testid="stDecoration"]{display:none !important}
+.stTabs [data-baseweb="tab"]{font-family:'Cormorant Garamond',Georgia,serif;font-size:1.15rem;letter-spacing:.06em}
+[data-testid="stMetric"]{background:#15181d;border:1px solid #3a3222;border-radius:8px;padding:10px 14px}
+[data-testid="stMetricLabel"]{color:#a9a294}
 h1,h2,h3{font-family:'Cormorant Garamond',Georgia,serif !important;letter-spacing:.04em}
 .avia-title{font-family:'Cormorant Garamond',Georgia,serif;font-size:2.6rem;letter-spacing:.22em;color:#d9b36c;margin:0}
 .avia-tag{color:#a9a294;margin-top:-6px}
@@ -92,15 +96,22 @@ with tabs[0]:
             hist[k] = [p for p in hist[k] if now - p[0] < 240][-25:]
             if not hist[k]:
                 del hist[k]
+        for col in ["flight", "type", "reg", "icao"]:
+            df[col] = df[col].fillna("").astype(str)
+        df["alt"] = pd.to_numeric(df.alt, errors="coerce").fillna(0).astype(int)
+        df["gs"] = pd.to_numeric(df.gs, errors="coerce").fillna(0).round().astype(int)
         df["color"] = df.alt.map(alt_color)
-        df["alt_m"] = df.alt.fillna(0).astype(float) * 0.3048 * (3 if view3d else 0)
+        df["alt_m"] = df.alt.astype(float) * 0.3048 * (3 if view3d else 0)
+        df = df[["icao", "flight", "type", "reg", "lat", "lon", "alt", "gs", "alt_m", "color"]]
         at = df[df.lat.between(LAT0, LAT1) & df.lon.between(LON0, LON1)]
-        c = st.columns(4)
-        c[0].metric(t(lang, "over_at"), len(at))
-        c[1].metric(t(lang, "in_radius"), len(df))
-        c[2].metric(t(lang, "highest"), f"{int(at.alt.max()):,} ft".replace(",", ".") if len(at) else "–")
-        tp = at[at.type.notna() & (at.type != "MIL")].type.value_counts()
-        c[3].metric(t(lang, "common"), tp.index[0] if len(tp) else "–")
+        left, right = st.columns([3, 1])
+        right.metric(t(lang, "over_at"), len(at))
+        right.metric(t(lang, "in_radius"), len(df))
+        right.metric(t(lang, "highest"), f"{int(at.alt.max()):,} ft".replace(",", ".") if len(at) else "–")
+        tp = at[(at.type != "") & (at.type != "MIL")].type.value_counts()
+        right.metric(t(lang, "common"), tp.index[0] if len(tp) else "–")
+        if len(tp):
+            right.dataframe(tp.head(8).rename_axis(t(lang, "types")).reset_index(name="#"), hide_index=True, use_container_width=True)
         trails = pd.DataFrame([{"path": [[p[1], p[2], p[3] * (3 if view3d else 0)] for p in v]} for v in hist.values() if len(v) > 1])
         layers = outline()
         if len(trails):
@@ -112,10 +123,11 @@ with tabs[0]:
                                     get_color=[120, 160, 200, 60], get_width=1))
         layers.append(pdk.Layer("ScatterplotLayer", df, get_position=["lon", "lat", "alt_m"], get_fill_color="color",
                                 get_radius=2200, radius_min_pixels=3, radius_max_pixels=10, pickable=True))
-        st.pydeck_chart(pdk.Deck(layers=layers, map_provider="carto", map_style="dark",
-                                 initial_view_state=pdk.ViewState(latitude=47.6, longitude=13.4, zoom=6.3,
-                                                                  pitch=50 if view3d else 0, bearing=-10 if view3d else 0),
-                                 tooltip={"text": "{flight} · {type}\n{alt} ft · {gs} kt"}), height=600)
+        with left:
+            st.pydeck_chart(pdk.Deck(layers=layers, map_provider="carto", map_style="dark",
+                                     initial_view_state=pdk.ViewState(latitude=47.6, longitude=13.4, zoom=6.3,
+                                                                      pitch=50 if view3d else 0, bearing=-10 if view3d else 0),
+                                     tooltip={"text": "{flight} · {type}\n{alt} ft · {gs} kt"}), height=640)
         mode = t(lang, f"mode_{d['mode']}")
         st.caption(f"{t(lang, 'source')}: {d['source']} · {mode} · {time.strftime('%H:%M:%S')}"
                    + (f" · {t(lang, 'masked')}" if role == "visitor" else ""))
