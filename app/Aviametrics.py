@@ -138,7 +138,7 @@ day = st.sidebar.selectbox(t(lang, "day"), days, index=len(days) - 1 if days els
                            placeholder=t(lang, "no_days_short")) if days else None
 if not days:
     st.sidebar.caption(t(lang, "no_days_short"))
-if st.sidebar.button("＋ " + t(lang, "add_day"), use_container_width=True):
+if st.sidebar.button("＋ " + t(lang, "add_day"), width="stretch"):
     add_day_dialog()
 if "toast" in st.session_state:
     st.toast(st.session_state.pop("toast"), icon="⏳")
@@ -176,6 +176,20 @@ def chip_label(f):
     return t(lang, f)
 
 
+def remove_filter(f):
+    """Callback: runs before the widgets are drawn, so their values may be reset here."""
+    if f in st.session_state["filters"]:
+        st.session_state["filters"].remove(f)
+    for k in DEFAULTS:
+        if k[2:] in f:
+            st.session_state[k] = DEFAULTS[k]
+
+
+def add_filter(f):
+    if f not in st.session_state["filters"]:
+        st.session_state["filters"].append(f)
+
+
 def chip_body(f, active):
     if f == "f_alt":
         st.slider(t(lang, f), 0, 50000, step=1000, format="%d ft", key="v_alt")
@@ -185,12 +199,7 @@ def chip_body(f, active):
         st.multiselect(t(lang, f), st.session_state.get("live_types", []), key="v_type", placeholder=t(lang, "all_types"))
     else:
         st.caption(t(lang, f + "_hint"))
-    if st.button("🗑 " + t(lang, "remove"), key=f"rm_{f}"):
-        active.remove(f)
-        for k in DEFAULTS:
-            if k[2:] in f:
-                st.session_state[k] = DEFAULTS[k]
-        st.rerun()
+    st.button("🗑 " + t(lang, "remove"), key=f"rm_{f}", on_click=remove_filter, args=(f,))
 
 
 with tabs[0]:
@@ -200,21 +209,20 @@ with tabs[0]:
     row = st.columns(widths, vertical_alignment="center")
     view3d = row[0].toggle(t(lang, "view3d"), value=False)
     for c, f in zip(row[1:1 + len(visible)], visible):
-        with c.popover(chip_label(f), use_container_width=True):
+        with c.popover(chip_label(f), width="stretch"):
             chip_body(f, active)
     i = 1 + len(visible)
     if hidden:
-        with row[i].popover("…", use_container_width=True):
+        with row[i].popover("…", width="stretch"):
             for f in hidden:
                 with st.expander(chip_label(f)):
                     chip_body(f, active)
         i += 1
-    with row[i].popover("＋ Filter", use_container_width=True):
+    with row[i].popover("＋ Filter", width="stretch"):
         q = st.text_input(t(lang, "search"), placeholder=t(lang, "search_filters"), label_visibility="collapsed")
         avail = [f for f in FILTERS if f not in active and q.lower() in t(lang, f).lower()]
         for f in avail:
-            if st.button(t(lang, f), key=f"add_{f}", use_container_width=True):
-                active.append(f); st.rerun()
+            st.button(t(lang, f), key=f"add_{f}", width="stretch", on_click=add_filter, args=(f,))
         if not avail:
             st.caption("–")
     fvals = {}
@@ -298,7 +306,7 @@ with tabs[0]:
                 sdf = pd.DataFrame(stats).assign(time=lambda x: pd.to_datetime(x.t, unit="s"))
                 st.altair_chart(alt.Chart(sdf).mark_line(color=GOLD, point=True).encode(
                     x=alt.X("time:T", title=None), y=alt.Y("ms:Q", title=t(lang, "latency") + " (ms)"),
-                    tooltip=["time:T", "ms:Q", "kb:Q", "n:Q"]), use_container_width=True)
+                    tooltip=["time:T", "ms:Q", "kb:Q", "n:Q"]), width="stretch")
                 st.caption(t(lang, "fetch_stats_hint"))
     live()
 
@@ -352,10 +360,10 @@ with tabs[2]:
             a, b = st.columns(2)
             a.subheader(t(lang, "per_hour"))
             a.altair_chart(alt.Chart(pd.DataFrame(s["hourly"])).mark_area(color=GOLD, opacity=.75, line=True)
-                           .encode(x=alt.X("hour:Q", title=None), y=alt.Y("aircraft:Q", title=None)), use_container_width=True)
+                           .encode(x=alt.X("hour:Q", title=None), y=alt.Y("aircraft:Q", title=None)), width="stretch")
             b.subheader(t(lang, "types"))
             b.altair_chart(alt.Chart(pd.DataFrame(s["types"])).mark_bar(color=BLUE)
-                           .encode(x=alt.X("aircraft:Q", title=None), y=alt.Y("type:N", sort="-x", title=None)), use_container_width=True)
+                           .encode(x=alt.X("aircraft:Q", title=None), y=alt.Y("type:N", sort="-x", title=None)), width="stretch")
             if s["regions"]:
                 st.subheader(t(lang, "per_region"))
                 reg = pd.DataFrame(s["regions"])
@@ -374,7 +382,7 @@ with tabs[2]:
                                                  map_provider="carto", map_style="dark", tooltip={"text": "{name}: {km} km"},
                                                  initial_view_state=pdk.ViewState(latitude=47.6, longitude=13.4, zoom=6.0)), height=420)
                 m2.altair_chart(alt.Chart(reg).mark_bar(color=GOLD).encode(x=alt.X("km:Q", title="km"), y=alt.Y("region:N", sort="-x", title=None)),
-                                use_container_width=True)
+                                width="stretch")
             f = s["facts"]
             st.subheader(t(lang, "facts"))
             if "longest_flight" in f:
@@ -415,8 +423,8 @@ with tabs[4]:
         res = co2_demo.run(API_URL, day, role)
         st.success(f"{time.perf_counter() - t0:.1f} s")
         st.altair_chart(alt.Chart(res.head(15)).mark_bar(color=BLUE).encode(
-            x=alt.X("t_co2:Q", title="t CO₂ (Demo)"), y=alt.Y("type:N", sort="-x", title=None)), use_container_width=True)
-        st.dataframe(res, use_container_width=True, hide_index=True)
+            x=alt.X("t_co2:Q", title="t CO₂ (Demo)"), y=alt.Y("type:N", sort="-x", title=None)), width="stretch")
+        st.dataframe(res, width="stretch", hide_index=True)
     with st.expander(t(lang, "plugin_code")):
         st.code(plugin.read_text(), language="python")
 
@@ -426,7 +434,7 @@ with tabs[5]:
     a, b = st.columns([3, 1])
     a.markdown(f"**{t(lang, 'data_location')}:** `{cfg['data_dir']}`")
     a.caption(t(lang, "data_location_help"))
-    if b.button("＋ " + t(lang, "add_day"), use_container_width=True, type="primary", key="add_data_tab"):
+    if b.button("＋ " + t(lang, "add_day"), width="stretch", type="primary", key="add_data_tab"):
         add_day_dialog()
     st.markdown(f"**{t(lang, 'loaded_days')}:** " + (", ".join(days) if days else "–"))
     st.markdown(f"#### {t(lang, 'jobs')}")
@@ -483,7 +491,7 @@ digraph G {
   arch -> dl [label="HTTPS"]; dl -> parse -> enr -> seg; geo -> enr; enr -> lake [label="atomic write"]; seg -> lake;
   lake -> repo [label="read"]; repo -> mask -> ep; live -> ep [label="fallback chain"];
   ep -> ui [label="HTTP"]; ep -> plug [label="Arrow"]; ui -> user;
-}""", use_container_width=True)
+}""", width="stretch")
     st.subheader(t(lang, "arch_stack"))
     st.dataframe(pd.DataFrame([
         ["Pipeline", "Dagster", "daily partitioned assets, data checks, UI"],
@@ -494,5 +502,5 @@ digraph G {
         ["API", "FastAPI · Uvicorn · Pydantic", "plugin interface, OpenAPI docs, JSON + Arrow"],
         ["App", "Streamlit · pydeck · deck.gl · Altair", "UI, maps, charts"],
         ["Operations", "Docker Compose · start.sh · uv", "one-command start, reproducible environment"],
-    ], columns=["Layer", "Technology", "Role"]), hide_index=True, use_container_width=True)
+    ], columns=["Layer", "Technology", "Role"]), hide_index=True, width="stretch")
     st.caption(t(lang, "arch_note"))
