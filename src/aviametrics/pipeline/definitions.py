@@ -24,7 +24,7 @@ def flights_plausible(context) -> dg.AssetCheckResult:
     days = storage.days(con)
     if not days or not storage.has(con, "flights", days[-1]):
         return dg.AssetCheckResult(passed=False, metadata={"reason": "no flights"})
-    n, too_long, max_km = con.execute(f"SELECT count(*), count(*) FILTER (WHERE t_end - t_start > 86400), max(km) FROM {storage.src('flights', days[-1])}").fetchone()
+    n, too_long, max_km = storage.one(con, f"SELECT count(*), count(*) FILTER (WHERE t_end - t_start > 86400), max(km) FROM {storage.src('flights', days[-1])}")
     return dg.AssetCheckResult(passed=n > 0 and too_long == 0, metadata={"segments": n, "segments_over_24h": too_long, "max_km": float(max_km or 0)})
 
 

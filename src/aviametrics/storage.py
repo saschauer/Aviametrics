@@ -23,6 +23,12 @@ def connect() -> duckdb.DuckDBPyConnection:
     return con
 
 
+def one(con, sql: str):
+    """First row of a query, reading the result completely (DuckDB 2.0 forbids leaving results unfinished)."""
+    rows = con.execute(sql).fetchall()
+    return rows[0] if rows else None
+
+
 def _file(table: str, day: str) -> str:
     return str(DATA / table / f"day={day}" / f"{table}.parquet")
 
@@ -35,12 +41,12 @@ def src(table: str, day: str) -> str:
 
 
 def _exists(con, table: str) -> bool:
-    return con.execute(f"SELECT count(*) FROM duckdb_tables() WHERE database_name = 'lake' AND table_name = '{table}'").fetchone()[0] > 0
+    return one(con, f"SELECT count(*) FROM duckdb_tables() WHERE database_name = 'lake' AND table_name = '{table}'")[0] > 0
 
 
 def has(con, table: str, day: str) -> bool:
     if MODE == "ducklake":
-        return _exists(con, table) and con.execute(f"SELECT count(*) > 0 FROM lake.{table} WHERE day = DATE '{day}'").fetchone()[0]
+        return _exists(con, table) and one(con, f"SELECT count(*) > 0 FROM lake.{table} WHERE day = DATE '{day}'")[0]
     import os
     return os.path.exists(_file(table, day))
 

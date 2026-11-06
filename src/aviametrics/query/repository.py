@@ -32,10 +32,10 @@ def _f(day):
 
 
 def kpis(day: str) -> dict:
-    n_pos, n_ac = con().execute(f"SELECT count(*), count(DISTINCT icao) FROM {_p(day)} WHERE {IN_AT}").fetchone()
-    km = con().execute(f"""SELECT sum({HAV}) FROM (SELECT lat, lon, lag(lat) OVER w plat, lag(lon) OVER w plon, ts - lag(ts) OVER w gap
-                       FROM {_p(day)} WINDOW w AS (PARTITION BY icao ORDER BY ts)) WHERE gap <= {GAP} AND {IN_AT}""").fetchone()[0]
-    segs = con().execute(f"SELECT count(*) FROM {_f(day)}").fetchone()[0] if storage.has(con(), "flights", day) else None
+    n_pos, n_ac = storage.one(con(), f"SELECT count(*), count(DISTINCT icao) FROM {_p(day)} WHERE {IN_AT}")
+    km = storage.one(con(), f"""SELECT sum({HAV}) FROM (SELECT lat, lon, lag(lat) OVER w plat, lag(lon) OVER w plon, ts - lag(ts) OVER w gap
+                       FROM {_p(day)} WINDOW w AS (PARTITION BY icao ORDER BY ts)) WHERE gap <= {GAP} AND {IN_AT}""")[0]
+    segs = storage.one(con(), f"SELECT count(*) FROM {_f(day)}")[0] if storage.has(con(), "flights", day) else None
     return {"positions": n_pos, "aircraft": n_ac, "flights": segs, "km": round(km or 0)}
 
 
@@ -59,13 +59,13 @@ def regions(day: str) -> list[dict]:
 def facts(day: str) -> dict:
     out = {}
     if storage.has(con(), "flights", day):
-        r = con().execute(f"SELECT coalesce(type,'?'), km, t_end - t_start FROM {_f(day)} WHERE NOT mil ORDER BY km DESC LIMIT 1").fetchone()
+        r = storage.one(con(), f"SELECT coalesce(type,'?'), km, t_end - t_start FROM {_f(day)} WHERE NOT mil ORDER BY km DESC LIMIT 1")
         if r:
             out["longest_flight"] = {"type": r[0], "km": r[1], "minutes": round(r[2] / 60)}
-    r = con().execute(f"SELECT ts // 60 AS m, count(DISTINCT icao) n FROM {_p(day)} WHERE {IN_AT} GROUP BY 1 ORDER BY 2 DESC LIMIT 1").fetchone()
+    r = storage.one(con(), f"SELECT ts // 60 AS m, count(DISTINCT icao) n FROM {_p(day)} WHERE {IN_AT} GROUP BY 1 ORDER BY 2 DESC LIMIT 1")
     if r:
         out["busiest_minute"] = {"utc_minute_of_day": int(r[0] % 1440), "aircraft": r[1]}
-    r = con().execute(f"SELECT coalesce(type,'?'), max(alt) FROM {_p(day)} WHERE {IN_AT} AND NOT mil GROUP BY 1 ORDER BY 2 DESC LIMIT 1").fetchone()
+    r = storage.one(con(), f"SELECT coalesce(type,'?'), max(alt) FROM {_p(day)} WHERE {IN_AT} AND NOT mil GROUP BY 1 ORDER BY 2 DESC LIMIT 1")
     if r:
         out["highest"] = {"type": r[0], "alt_ft": r[1]}
     return out
@@ -73,7 +73,7 @@ def facts(day: str) -> dict:
 
 def trips(day: str, step_s: int = 30) -> dict:
     """Downsampled trajectories for the time-travel animation (seconds since local midnight)."""
-    t0 = con().execute(f"SELECT min(ts) - (min(ts) + 3600) % 86400 FROM {_p(day)}").fetchone()[0]
+    t0 = storage.one(con(), f"SELECT min(ts) - (min(ts) + 3600) % 86400 FROM {_p(day)}")[0]
     rows = con().sql(f"""SELECT icao, bool_or(mil) AS mil, list([lon, lat] ORDER BY ts) AS path,
                                 list(ts - {t0} ORDER BY ts) AS t, list(coalesce(alt, 0) ORDER BY ts) AS alt
                          FROM (SELECT * FROM {_p(day)} QUALIFY row_number() OVER (PARTITION BY icao, ts // {step_s} ORDER BY ts) = 1)
