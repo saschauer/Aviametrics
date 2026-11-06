@@ -8,7 +8,7 @@ import duckdb
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from aviametrics import storage
+from aviametrics import progress, storage
 from aviametrics.config import BUFFER, DATA, GAP, geo_dir
 from aviametrics.sources.adsblol import raw_day_dir, read_trace, trace_files
 
@@ -52,11 +52,17 @@ def regions_file() -> Path | None:
 
 
 def build_positions(day: str, log=print) -> str:
+    progress.report(day, "download", 0, "")
     raw = raw_day_dir(day)
     files = trace_files(raw)
     log(f"{len(files)} trace files")
+    parts = []
     with Pool(max(1, (os.cpu_count() or 2) - 1)) as pool:
-        parts = [t for t in pool.imap_unordered(_parse, files, chunksize=64) if t is not None]
+        for i, t in enumerate(pool.imap_unordered(_parse, files, chunksize=64)):
+            if t is not None:
+                parts.append(t)
+            if i % 2000 == 0:
+                progress.report(day, "parse", 100 * i / max(1, len(files)), f"{i:,} / {len(files):,} files · {len(parts):,} aircraft")
     tbl = pa.concat_tables(parts).sort_by([("icao", "ascending"), ("ts", "ascending")])
     log(f"{tbl.num_rows} positions, {len(parts)} aircraft")
     stage = DATA / "staging"
@@ -64,6 +70,7 @@ def build_positions(day: str, log=print) -> str:
     tmp = stage / f"positions_{day}.parquet"
     pq.write_table(tbl, tmp, compression="zstd")
     con = storage.connect()
+    progress.report(day, "enrich", None, f"{tbl.num_rows:,} positions")
     select = f"SELECT *, NULL::VARCHAR AS bl FROM '{tmp}'"
     try:  # enrichment: Bundesland per position (DuckDB spatial, point-in-polygon)
         con.sql("INSTALL spatial; LOAD spatial")
@@ -75,6 +82,7 @@ def build_positions(day: str, log=print) -> str:
                   f"ORDER BY icao, ts")
     except Exception as e:
         log(f"Bundesland enrichment skipped: {e!r}")
+    progress.report(day, "write", None, storage.MODE)
     target = storage.write(con, "positions", day, select)
     tmp.unlink()
     log(f"written {target}")
@@ -83,6 +91,7 @@ def build_positions(day: str, log=print) -> str:
 
 def build_flights(day: str) -> str:
     """Flight segmentation: a new segment starts after more than GAP seconds without signal."""
+    progress.report(day, "flights", None, "segmentation")
     con = storage.connect()
     select = f"""
           WITH d AS (SELECT *, ts - lag(ts) OVER w AS gap, lag(lat) OVER w AS plat, lag(lon) OVER w AS plon

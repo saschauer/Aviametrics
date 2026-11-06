@@ -99,3 +99,8 @@ def flights(day: str):
 # ------------------------------------------------------------------ masking (concept of Isaac's RBAC)
 def mask(value):
     return "•••" + hashlib.sha1(str(value).encode()).hexdigest()[:4] if value else value
+
+
+def heat(day: str, n: int = 250000) -> list:
+    rows = con().sql(f"SELECT lon, lat, alt FROM (SELECT lon, lat, coalesce(alt, 0) AS alt FROM {_p(day)} WHERE {IN_AT}) USING SAMPLE {int(n)} ROWS").fetchall()
+    return [[round(a, 4), round(b, 4), c] for a, b, c in rows]

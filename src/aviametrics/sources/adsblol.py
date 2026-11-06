@@ -10,6 +10,7 @@ from pathlib import Path
 import httpx
 import orjson
 
+from aviametrics import progress
 from aviametrics.config import CFG, DATA, IMPORT_DATE, IMPORT_DIR, IMPORT_NAME
 
 UA = {"User-Agent": "aviametrics/0.1 (TGM diploma project)"}
@@ -35,15 +36,23 @@ def raw_day_dir(day: str) -> Path:
                 with c.stream("GET", url) as r:
                     if r.status_code != 200:
                         break
+                    total, got, last = int(r.headers.get("content-length", 0)), 0, 0.0
                     with open(out, "wb") as fh:
                         for chunk in r.iter_bytes(1 << 20):
                             fh.write(chunk)
+                            got += len(chunk)
+                            if time.time() - last > 1:
+                                last = time.time()
+                                progress.report(day, "download", 100 * got / total if total else None,
+                                                f"{variant} · Teil/part {part}: {got / 1e9:.2f} / {total / 1e9:.2f} GB")
                 parts.append(out)
             if parts:
                 break
     if not parts:
+        progress.report(day, "download", None, f"no adsb.lol archive found for {day}", status="failed")
         raise RuntimeError(f"no adsb.lol archive found for {day}")
     target.mkdir(parents=True, exist_ok=True)
+    progress.report(day, "extract", None, f"{len(parts)} parts")
     subprocess.run(f"cat {' '.join(map(str, parts))} | tar -x -C {target}", shell=True, check=True)
     shutil.rmtree(tmp, ignore_errors=True)
     return target

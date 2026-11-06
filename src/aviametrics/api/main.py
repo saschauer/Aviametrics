@@ -16,6 +16,7 @@ from pydantic import BaseModel
 
 from aviametrics.config import BBOX, DATA, HOST_HOME, ROOT, to_container
 from aviametrics.sources.adsblol import read_trace
+from aviametrics import progress
 from aviametrics.query import repository as repo
 from aviametrics.sources.adsblol import live_snapshot
 
@@ -99,6 +100,12 @@ def _run_pipeline(day: str, source: str | None = None):
         r = subprocess.run(["dagster", "asset", "materialize", "-m", "aviametrics.pipeline.definitions",
                             "--select", "*", "--partition", day], stdout=fh, stderr=subprocess.STDOUT, cwd=ROOT, env=env)
     _jobs[day] = "done" if r.returncode == 0 else "failed"
+    if r.returncode == 0:
+        progress.report(day, "done", 100, "ok", status="done")
+    else:
+        lines = [l for l in log.read_text().splitlines() if l.strip()]
+        err = next((l for l in reversed(lines) if "Error" in l or "error" in l), lines[-1] if lines else "unknown error")
+        progress.report(day, (progress.read(day) or {}).get("stage", "download"), None, err[-300:], status="failed")
 
 
 @app.post("/v1/days/{day}", summary="Load a day: runs the Dagster pipeline (download or import → positions → flights)")
@@ -107,6 +114,8 @@ def load_day(day: date, bg: BackgroundTasks, source: str | None = None):
     if _jobs.get(d) == "running":
         return {"day": d, "status": "running"}
     _jobs[d] = "running"
+    progress.path(d).unlink(missing_ok=True)
+    progress.report(d, "download", 0, "queued")
     bg.add_task(_run_pipeline, d, source)
     return {"day": d, "status": "started"}
 
@@ -206,3 +215,18 @@ def browse(path: str = "~"):
     rel = "~" + host[len(home):]
     return {"path": rel or "~", "parent": "~" + os.path.dirname(host)[len(home):] if host != home else None,
             "folders": subs, "is_adsblol_day": (p / "traces").is_dir()}
+
+
+@app.get("/v1/jobs", summary="Progress of pipeline runs (newest first)")
+def jobs():
+    out = []
+    for f in sorted((DATA / "logs").glob("*.progress.json"), key=lambda p: p.stat().st_mtime, reverse=True)[:5]:
+        p = progress.read(f.name.split(".")[0])
+        if p:
+            out.append(p)
+    return {"stages": progress.STAGES, "jobs": out}
+
+
+@app.get("/v1/heat/{day}", summary="Sampled positions for density maps")
+def heat(day: str, n: int = 250000):
+    return repo.heat(_day(day), n)

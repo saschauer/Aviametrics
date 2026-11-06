@@ -78,7 +78,17 @@ def outline():
 
 # ------------------------------------------------------------------ 1 live radar
 with tabs[0]:
-    view3d = st.toggle(t(lang, "view3d"), value=False)
+    fc = st.columns([1, 1, 2, 3])
+    view3d = fc[0].toggle(t(lang, "view3d"), value=False)
+    only_at = fc[1].toggle(t(lang, "only_at"), value=False)
+    alt_rng = fc[2].slider(t(lang, "alt_filter"), 0, 50000, (0, 50000), step=1000, format="%d ft")
+    type_sel = fc[3].multiselect(t(lang, "type_filter"), st.session_state.get("live_types", []), placeholder=t(lang, "all_types"))
+    st.markdown(f"""<div style="display:flex;gap:18px;align-items:center;flex-wrap:wrap;font-size:.85rem;color:#a9a294;margin:-4px 0 6px">
+      <span><b style="color:#e9e4d8">{t(lang, "legend")}</b></span>
+      <span>● {t(lang, "leg_dot")}</span><span style="color:#d9b36c">━ {t(lang, "leg_trail")}</span>
+      <span>{t(lang, "leg_alt")}: 0 ft <span style="display:inline-block;width:140px;height:9px;border-radius:5px;vertical-align:middle;
+        background:linear-gradient(90deg,rgb(80,170,255),rgb(168,186,150),rgb(255,140,45))"></span> 40.000 ft</span>
+      <span>▭ {t(lang, "leg_border")}</span></div>""", unsafe_allow_html=True)
 
     @st.fragment(run_every=10)
     def live():
@@ -103,7 +113,13 @@ with tabs[0]:
         df["color"] = df.alt.map(alt_color)
         df["alt_m"] = df.alt.astype(float) * 0.3048 * (3 if view3d else 0)
         df = df[["icao", "flight", "type", "reg", "lat", "lon", "alt", "gs", "alt_m", "color"]]
+        st.session_state["live_types"] = sorted(x for x in df.type.unique() if x)
+        df = df[df.alt.between(*alt_rng)]
+        if type_sel:
+            df = df[df.type.isin(type_sel)]
         at = df[df.lat.between(LAT0, LAT1) & df.lon.between(LON0, LON1)]
+        if only_at:
+            df = at
         left, right = st.columns([3, 1])
         right.metric(t(lang, "over_at"), len(at))
         right.metric(t(lang, "in_radius"), len(df))
@@ -145,7 +161,26 @@ with tabs[1]:
         @st.cache_data(show_spinner=True)
         def trips(day, role):
             return api(f"/v1/trips/{day}?step_s=60")
-        data = trips(day, role)
+        view = st.radio(t(lang, "tt_view"), ["anim", "heat", "hex"], horizontal=True,
+                        format_func=lambda v: t(lang, f"tt_{v}"), key="tt_view")
+        data = trips(day, role) if view == "anim" else None
+        if view != "anim":
+            @st.cache_data(show_spinner=True)
+            def heatdata(day):
+                return api(f"/v1/heat/{day}")
+            pts = pd.DataFrame(heatdata(day) or [], columns=["lon", "lat", "alt"])
+            if view == "heat":
+                layer = pdk.Layer("HeatmapLayer", pts, get_position=["lon", "lat"], radius_pixels=22, intensity=1.2,
+                                  threshold=0.03, color_range=[[20, 30, 60], [60, 90, 150], [120, 150, 200], [217, 179, 108], [255, 140, 45], [255, 230, 180]])
+                vs = pdk.ViewState(latitude=47.6, longitude=13.4, zoom=6.4)
+            else:
+                layer = pdk.Layer("HexagonLayer", pts, get_position=["lon", "lat"], radius=4000, elevation_scale=60,
+                                  extruded=True, coverage=0.9, pickable=True,
+                                  color_range=[[40, 60, 100], [70, 110, 160], [140, 160, 170], [217, 179, 108], [240, 150, 60], [255, 100, 40]])
+                vs = pdk.ViewState(latitude=47.3, longitude=13.4, zoom=6.5, pitch=50, bearing=-15)
+            st.pydeck_chart(pdk.Deck(layers=outline() + [layer], map_provider="carto", map_style="dark", initial_view_state=vs,
+                                     tooltip={"text": "{elevationValue}"} if view == "hex" else None), height=620)
+            st.caption(t(lang, f"tt_{view}_cap"))
         if data:
             html = (Path(__file__).parent / "timetravel.html").read_text()
             components.html(html.replace("__TRIPS__", json.dumps(data["trips"], separators=(",", ":")))
@@ -297,6 +332,39 @@ with tabs[5]:
             elif r.get("day") and c[2].button(t(lang, "import_btn"), key=f"imp{i}"):
                 api(f"/v1/days/{r['day']}", method="POST", params={"source": r["folder"]})
                 st.success(t(lang, "load_started"))
+    st.markdown("---")
+    st.markdown(f"**{t(lang, 'jobs')}**")
+
+    @st.fragment(run_every=2)
+    def jobs_view():
+        j = api("/v1/jobs")
+        if not j or not j["jobs"]:
+            st.caption(t(lang, "no_jobs")); return
+        stages = [x for x in j["stages"] if x != "done"]
+        for job in j["jobs"]:
+            with st.container(border=True):
+                status, stage = job.get("status"), job.get("stage")
+                icon = {"running": "⏳", "done": "✅", "failed": "❌"}.get(status, "•")
+                elapsed = int(job.get("updated", 0) - job.get("started", 0))
+                st.markdown(f"{icon} **{job['day']}** · {t(lang, 'st_' + status) if status else ''} · {elapsed // 60}:{elapsed % 60:02d} min")
+                cols = st.columns(len(stages))
+                for c, sname in zip(cols, stages):
+                    if status == "done" or sname in job.get("done_stages", []):
+                        mark = "✓"
+                    elif sname == stage:
+                        mark = "✗" if status == "failed" else "⏳"
+                    else:
+                        mark = "·"
+                    c.markdown(f"<div style='text-align:center;font-size:.85rem'>{mark}<br>{t(lang, 'stage_' + sname)}</div>", unsafe_allow_html=True)
+                if status == "running":
+                    pct = job.get("pct")
+                    st.progress(min(1.0, (pct or 0) / 100), text=job.get("msg") or "")
+                elif status == "failed":
+                    st.error(job.get("msg") or "")
+                elif status == "done":
+                    st.success(t(lang, "job_done"))
+    jobs_view()
+
     st.markdown("---")
     st.markdown(f"**{t(lang, 'load_day')}**")
     nd = st.date_input(t(lang, "day"), value=None, format="DD.MM.YYYY", key="dl_day")
