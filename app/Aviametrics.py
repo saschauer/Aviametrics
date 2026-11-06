@@ -42,7 +42,8 @@ def api(path, method="GET", **kw):
         r = httpx.request(method, f"{API_URL}{path}", headers={"X-Role": st.session_state.get("role", "visitor")}, timeout=90, **kw)
         r.raise_for_status()
         return r.json()
-    except Exception:
+    except Exception as e:
+        st.session_state["api_error"] = f"{method} {path}: {e}"
         return None
 
 
@@ -88,22 +89,32 @@ def add_day_dialog():
         if nd and st.button(t(lang, "start_download"), type="primary"):
             api(f"/v1/days/{nd}", method="POST"); st.session_state["toast"] = t(lang, "load_started"); st.rerun()
     with d2:
-        cur = st.session_state.setdefault("browse", "~")
-        b = api("/v1/browse", params={"path": cur}) or {"path": "~", "folders": [], "parent": None}
-        c = st.columns([1, 5])
-        if b.get("parent") is not None and c[0].button("⬆", key="up"):
-            st.session_state["browse"] = b["parent"] or "~"; st.rerun(scope="fragment")
-        c[1].markdown(f"📁 `{b['path']}`" + ("  ✅ adsb.lol" if b.get("is_adsblol_day") else ""))
-        sel = st.selectbox(t(lang, "subfolder"), [""] + b["folders"], key=f"sub_{cur}")
-        if sel:
-            st.session_state["browse"] = b["path"].rstrip("/") + "/" + sel; st.rerun(scope="fragment")
-        if st.button(t(lang, "scan_this"), type="primary"):
-            st.session_state["found"] = api("/v1/scan_path", params={"path": b["path"]}) or []
+        st.caption(t(lang, "folder_hint"))
+        pth = st.text_input(t(lang, "folder_path"), value=st.session_state.get("browse", "~/"), placeholder="~/aviabench")
+        if st.button(t(lang, "scan_this"), type="primary", key="scan_path_btn"):
+            st.session_state["browse"] = pth
+            res = api("/v1/scan_path", params={"path": pth})
+            st.session_state["found"] = res if res is not None else []
+            if res is None:
+                st.error(st.session_state.get("api_error", "API error"))
+        with st.expander(t(lang, "browse")):
+            cur = st.session_state.get("browse", "~") or "~"
+            b = api("/v1/browse", params={"path": cur}) or {"path": "~", "folders": [], "parent": None}
+            c = st.columns([1, 5])
+            if b.get("parent") is not None and c[0].button("⬆", key="up"):
+                st.session_state["browse"] = b["parent"] or "~"; st.rerun(scope="fragment")
+            c[1].markdown(f"📁 `{b['path']}`" + ("  ✅ adsb.lol" if b.get("is_adsblol_day") else ""))
+            sel = st.selectbox(t(lang, "subfolder"), [""] + b["folders"], key=f"sub_{cur}")
+            if sel:
+                st.session_state["browse"] = b["path"].rstrip("/") + "/" + sel; st.rerun(scope="fragment")
     with d3:
         st.caption(t(lang, "auto_hint"))
         if st.button(t(lang, "auto_btn"), type="primary"):
-            with st.spinner("…"):
-                st.session_state["found"] = api("/v1/scan", params={"auto": True}) or []
+            with st.spinner(t(lang, "searching")):
+                res = api("/v1/scan", params={"auto": "true"})
+            st.session_state["found"] = res if res is not None else []
+            if res is None:
+                st.error(st.session_state.get("api_error", "API error"))
     found = st.session_state.get("found")
     if found is not None:
         st.markdown("---")
@@ -148,36 +159,68 @@ def need_day():
 
 # ------------------------------------------------------------------ 1 live radar with Notion-style filters
 FILTERS = ["f_alt", "f_speed", "f_type", "f_at", "f_ground"]
+MAX_CHIPS = 4
+DEFAULTS = {"v_alt": (0, 50000), "v_speed": (0, 700), "v_type": []}
+for k, v in DEFAULTS.items():
+    st.session_state.setdefault(k, v)
+
+
+def chip_label(f):
+    v = st.session_state
+    if f == "f_alt":
+        lo, hi = v["v_alt"]; return f"{t(lang, f)} · {lo // 1000}–{hi // 1000}k ft"
+    if f == "f_speed":
+        lo, hi = v["v_speed"]; return f"{t(lang, f)} · {lo}–{hi} kt"
+    if f == "f_type":
+        n = len(v["v_type"]); return f"{t(lang, f)}" + (f" · {n}" if n else "")
+    return t(lang, f)
+
+
+def chip_body(f, active):
+    if f == "f_alt":
+        st.slider(t(lang, f), 0, 50000, step=1000, format="%d ft", key="v_alt")
+    elif f == "f_speed":
+        st.slider(t(lang, f), 0, 700, step=10, format="%d kt", key="v_speed")
+    elif f == "f_type":
+        st.multiselect(t(lang, f), st.session_state.get("live_types", []), key="v_type", placeholder=t(lang, "all_types"))
+    else:
+        st.caption(t(lang, f + "_hint"))
+    if st.button("🗑 " + t(lang, "remove"), key=f"rm_{f}"):
+        active.remove(f)
+        for k in DEFAULTS:
+            if k[2:] in f:
+                st.session_state[k] = DEFAULTS[k]
+        st.rerun()
+
+
 with tabs[0]:
     active = st.session_state.setdefault("filters", [])
-    bar = st.columns([1, 1, 6])
-    view3d = bar[0].toggle(t(lang, "view3d"), value=False)
-    with bar[1].popover("＋ Filter"):
-        avail = [f for f in FILTERS if f not in active]
-        if avail:
-            pick = st.selectbox(t(lang, "add_filter"), avail, format_func=lambda f: t(lang, f), index=None, placeholder="…")
-            if pick:
-                active.append(pick); st.rerun()
-        else:
-            st.caption("✓")
+    visible, hidden = active[:MAX_CHIPS], active[MAX_CHIPS:]
+    widths = [1.1] + [1.7] * len(visible) + ([0.6] if hidden else []) + [1.0, max(0.1, 8 - 1.7 * len(visible))]
+    row = st.columns(widths, vertical_alignment="center")
+    view3d = row[0].toggle(t(lang, "view3d"), value=False)
+    for c, f in zip(row[1:1 + len(visible)], visible):
+        with c.popover(chip_label(f), use_container_width=True):
+            chip_body(f, active)
+    i = 1 + len(visible)
+    if hidden:
+        with row[i].popover("…", use_container_width=True):
+            for f in hidden:
+                with st.expander(chip_label(f)):
+                    chip_body(f, active)
+        i += 1
+    with row[i].popover("＋ Filter", use_container_width=True):
+        q = st.text_input(t(lang, "search"), placeholder=t(lang, "search_filters"), label_visibility="collapsed")
+        avail = [f for f in FILTERS if f not in active and q.lower() in t(lang, f).lower()]
+        for f in avail:
+            if st.button(t(lang, f), key=f"add_{f}", use_container_width=True):
+                active.append(f); st.rerun()
+        if not avail:
+            st.caption("–")
     fvals = {}
-    if active:
-        cols = st.columns(len(active))
-        for c, f in zip(cols, list(active)):
-            with c.container(border=True):
-                h = st.columns([5, 1])
-                h[0].markdown(f"**{t(lang, f)}**")
-                if h[1].button("✕", key=f"rm_{f}"):
-                    active.remove(f); st.rerun()
-                if f == "f_alt":
-                    fvals[f] = st.slider(" ", 0, 50000, (0, 50000), 1000, format="%d ft", key="v_alt", label_visibility="collapsed")
-                elif f == "f_speed":
-                    fvals[f] = st.slider(" ", 0, 700, (0, 700), 10, format="%d kt", key="v_speed", label_visibility="collapsed")
-                elif f == "f_type":
-                    fvals[f] = st.multiselect(" ", st.session_state.get("live_types", []), key="v_type", label_visibility="collapsed")
-                else:
-                    fvals[f] = True
-                    st.caption(t(lang, f + "_hint"))
+    for f in active:
+        fvals[f] = {"f_alt": st.session_state["v_alt"], "f_speed": st.session_state["v_speed"],
+                    "f_type": st.session_state["v_type"]}.get(f, True)
     st.markdown(f"""<div class="legend"><b style="color:#e9e4d8">{t(lang, "legend")}</b>
       <span>● {t(lang, "leg_dot")}</span><span style="color:{GOLD}">━ {t(lang, "leg_trail")}</span>
       <span>{t(lang, "leg_alt")}: 0 ft <span style="display:inline-block;width:140px;height:9px;border-radius:5px;vertical-align:middle;

@@ -107,29 +107,42 @@ def heat(day: str, n: int = 250000) -> list:
 
 
 # ------------------------------------------------------------------ live helpers
-def _austria_polygon(c) -> bool:
-    if getattr(_local, "poly", None) is None:
+_RINGS = None
+
+
+def _rings():
+    """All polygon rings of the Bundesländer (lon/lat) from the Statistik Austria GeoJSON, loaded once."""
+    global _RINGS
+    if _RINGS is None:
+        import json
+        import numpy as np
         from aviametrics.config import geo_dir
         cand = [p for p in geo_dir().glob("2021/**/*.json") if "laender" in p.name.lower() and "topo" not in str(p).lower()]
-        if not cand:
-            _local.poly = False
-            return False
-        c.sql("INSTALL spatial; LOAD spatial")
-        f = min(cand, key=lambda p: p.stat().st_size)
-        c.sql(f"CREATE OR REPLACE TEMP TABLE at_poly AS SELECT ST_Union_Agg(geom) AS g FROM ST_Read('{f}')")
-        _local.poly = True
-    return _local.poly
+        rings = []
+        if cand:
+            g = json.loads(min(cand, key=lambda p: p.stat().st_size).read_text())
+            for f in g["features"]:
+                geom = f["geometry"]
+                polys = [geom["coordinates"]] if geom["type"] == "Polygon" else geom["coordinates"]
+                rings += [np.asarray(r, dtype=float)[:, :2] for poly in polys for r in poly]
+        _RINGS = rings
+    return _RINGS
 
 
 def in_austria(lons: list, lats: list) -> set[int]:
-    """Indices of points that lie inside Austria's border (polygon test); falls back to the bounding box."""
-    import pyarrow as pa
-    c = con()
-    if not lons:
-        return set()
-    if not _austria_polygon(c):
-        return {i for i, (x, y) in enumerate(zip(lons, lats)) if LAT0 <= y <= LAT1 and LON0 <= x <= LON1}
-    c.register("pts", pa.table({"i": list(range(len(lons))), "lon": [float(x) for x in lons], "lat": [float(y) for y in lats]}))
-    rows = c.execute("SELECT i FROM pts, at_poly WHERE ST_Contains(g, ST_Point(lon, lat))").fetchall()
-    c.unregister("pts")
-    return {r[0] for r in rows}
+    """Indices of points inside Austria's national border: ray-casting point-in-polygon (even-odd rule
+    over all rings of all Bundesländer, so the Vienna hole in Lower Austria is handled correctly)."""
+    import numpy as np
+    x, y = np.asarray(lons, dtype=float), np.asarray(lats, dtype=float)
+    cand = np.where((y >= LAT0) & (y <= LAT1) & (x >= LON0) & (x <= LON1))[0]
+    rings = _rings()
+    if not rings or len(cand) == 0:
+        return set(cand.tolist()) if not rings else set()
+    px, py = x[cand][:, None], y[cand][:, None]
+    inside = np.zeros(len(cand), dtype=bool)
+    for r in rings:
+        xi, yi = r[:, 0][None, :], r[:, 1][None, :]
+        xj, yj = np.roll(r[:, 0], 1)[None, :], np.roll(r[:, 1], 1)[None, :]
+        cross = ((yi > py) != (yj > py)) & (px < (xj - xi) * (py - yi) / np.where(yj - yi == 0, 1e-12, yj - yi) + xi)
+        inside ^= (cross.sum(axis=1) % 2 == 1)
+    return set(cand[inside].tolist())

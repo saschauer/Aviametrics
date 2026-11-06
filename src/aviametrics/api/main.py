@@ -79,8 +79,11 @@ def live(x_role: Role = Header("visitor")):
         out.append(rec)
     try:
         inside = repo.in_austria([r["lon"] for r in out], [r["lat"] for r in out])
-    except Exception:
-        inside = set()
+    except Exception as e:  # never silently: log and fall back to the bounding box
+        import logging
+        logging.getLogger("uvicorn.error").exception("Austria polygon test failed: %s", e)
+        la0, la1, lo0, lo1 = BBOX
+        inside = {i for i, r in enumerate(out) if la0 <= r["lat"] <= la1 and lo0 <= r["lon"] <= lo1}
     for i, r in enumerate(out):
         r["in_at"] = i in inside
     return {"source": snap["source"], "mode": snap["mode"], "aircraft": out, "bbox_core": BBOX,
@@ -189,7 +192,7 @@ def scan(max_depth: int = 3, auto: bool = False):
     found, loaded = [], set(repo.days())
     roots = [HOST_HOME or os.path.expanduser("~")] if auto else _settings().folders
     if auto:
-        max_depth = 4
+        max_depth = 5
     for folder in roots:
         root = to_container(folder)
         if not root.is_dir():
@@ -207,7 +210,8 @@ def scan(max_depth: int = 3, auto: bool = False):
             if depth < max_depth:
                 try:
                     stack += [(c, depth + 1) for c in d.iterdir() if c.is_dir() and not c.name.startswith(".")
-                              and c.name not in {"node_modules", "venv", ".venv", "__pycache__", "site-packages", "aviametrics-data"}]
+                              and c.name not in {"node_modules", "venv", ".venv", "__pycache__", "site-packages", "aviametrics-data",
+                                                 "go", "snap", "Library", "AppData", "traces", "heatmap", "acas"}]
                 except PermissionError:
                     pass
     return found
