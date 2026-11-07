@@ -163,6 +163,17 @@ st.sidebar.markdown("---")
 if days and st.session_state.get("day") not in days:
     st.session_state["day"] = days[-1]
 day = st.session_state.get("day") if days else None
+if st.sidebar.button("+ " + t(lang, "add_day"), width="stretch"):
+    add_data_dialog()
+if "toast" in st.session_state:
+    st.toast(st.session_state.pop("toast"))
+st.sidebar.markdown("---")
+st.sidebar.caption("Flugdatenanalyse für das BMLV · TGM 2026/27\n\nStefan Aschauer · Isaac Jerryson")
+st.sidebar.caption(t(lang, "credits"))
+
+st.markdown('<p class="avia-title">AVIAMETRICS</p>', unsafe_allow_html=True)
+st.markdown(f'<p class="avia-tag">{t(lang, "tagline")}</p>', unsafe_allow_html=True)
+tabs = st.tabs([t(lang, k) for k in ["tab_live", "tab_time", "tab_numbers", "tab_guess", "tab_plugin", "tab_data", "tab_arch"]])
 
 
 def period_picker(tab: str):
